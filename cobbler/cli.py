@@ -28,6 +28,7 @@ import exceptions
 import time
 import os
 
+import new_api
 import utils
 import module_loader
 import item_distro
@@ -100,14 +101,9 @@ def opt(options, k):
 class BootCLI:
 
     def __init__(self):
-        # Load server ip and ports from local config
-        self.url_cobbler_api = utils.local_get_cobbler_api_url()
-        self.url_cobbler_xmlrpc = utils.local_get_cobbler_xmlrpc_url()
-
         # FIXME: allow specifying other endpoints, and user+pass
         self.parser        = optparse.OptionParser()
-        self.remote        = xmlrpclib.Server(self.url_cobbler_api)
-        self.shared_secret = utils.get_shared_secret()
+        self.remote        = new_api.CobblerAPI()
 
     def start_task(self, name, options):
         options = utils.strip_none(vars(options), omit_none=True)
@@ -155,15 +151,23 @@ class BootCLI:
         Detect permissions and service accessibility problems and provide
         nicer error messages for them.
         """
-
-        s = xmlrpclib.Server(self.url_cobbler_xmlrpc)
+        
+        # If this check isn't run on the same hosts as cobblerd,
+        # It will fail, so skip it if we aren't running locally.
+        #
+        # FIXME: This check should be rewritten to be runnable
+        # remotely.
+        if not new_api.settings.run_local:
+            return None
+        
+        s = new_api.CobblerAPI(url="http://127.0.0.1:%s" % (new_api.settings.xmlrpc_port))
         try:
             s.ping()
         except:
             print >> sys.stderr, "cobblerd does not appear to be running/accessible" 
             sys.exit(411)
 
-        s = xmlrpclib.Server(self.url_cobbler_api)
+        s = new_api.CobblerAPI()
         try:
             s.ping()
         except:
@@ -182,7 +186,7 @@ class BootCLI:
         """
         Process the command line and do what the user asks.
         """
-        self.token         = self.remote.login("", self.shared_secret)
+        self.token    = self.remote.token
         object_type   = self.get_object_type(args)
         object_action = self.get_object_action(object_type, args)
         direct_action = self.get_direct_action(object_type, args)
