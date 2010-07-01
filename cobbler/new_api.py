@@ -9,7 +9,7 @@ except ImportError:
 
 class CobblerAPI(xmlrpclib.Server, object):
     
-    def __init__(self, url=None, user=None, password=None):
+    def __init__(self, url=None, username=None, password=None, *args, **kwargs):
         if not url: url = settings.cobbler_url
         self._url = url
         
@@ -18,10 +18,11 @@ class CobblerAPI(xmlrpclib.Server, object):
         else:
             self._shared_secret = None
         
-        xmlrpclib.Server.__init__(self, self._url)
+        kwargs.update({'allow_none': True})
+        xmlrpclib.Server.__init__(self, self._url, *args, **kwargs)
         
-        if user and password:
-            self.token = self.login(user, password)
+        if username and password:
+            self.token = self.login(username, password)
         elif self._shared_secret:
             self.token = self.login("", self._shared_secret)
     

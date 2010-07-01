@@ -20,10 +20,9 @@ import cobbler.item_repo    as item_repo
 import cobbler.item_image   as item_image
 import cobbler.field_info   as field_info
 import cobbler.utils        as utils
+import cobbler.new_api      as api
 
-url_cobbler_api = None
 remote = None
-token = None
 username = None
 
 #==================================================================================
@@ -35,20 +34,14 @@ def authenhandler(req):
     """
 
     global remote
-    global token
     global username
-    global url_cobbler_api
 
     password = req.get_basic_auth_pw()
     username = req.user     
     try:
         # Load server ip and port from local config
-        if url_cobbler_api is None:
-            url_cobbler_api = utils.local_get_cobbler_api_url()
-
-        remote = xmlrpclib.Server(url_cobbler_api, allow_none=True)
-        token = remote.login(username, password)
-        remote.update(token)
+        remote = api.CobblerAPI(username=username, password=password)
+        remote.update(remote.token)
         return apache.OK
     except:
         return apache.HTTP_UNAUTHORIZED
@@ -61,33 +54,14 @@ def check_auth(request):
     proper headers and ensures that the environment is setup.
     """
     global remote
-    global token
     global username
-    global url_cobbler_api
-
-    if url_cobbler_api is None:
-        url_cobbler_api = utils.local_get_cobbler_api_url()
-
-    remote = xmlrpclib.Server(url_cobbler_api, allow_none=True)
-
-    if token is not None:
-        try:
-            token_user = remote.get_user_from_token(token)
-        except:
-            token_user = None
-    else:
-        token_user = None
-
-    if request.META.has_key('REMOTE_USER'):
-        if token_user == request.META['REMOTE_USER']:
-            return
+    if request.META.has_key('REMOTE_USER') and username is None:
         username = request.META['REMOTE_USER']
         #REMOTE_USER is set, so no credentials are going to be available
         #So we get the shared secret and let authn_passthru authenticate us
-        password = utils.get_shared_secret()
         # Load server ip and port from local config
-        token = remote.login(username, password)
-        remote.update(token)
+        remote = api.CobblerAPI(username=username, password=password)
+        remote.update(remote.token)
 
 
 #==================================================================================
@@ -100,7 +74,7 @@ def index(request):
    check_auth(request)
    t = get_template('index.tmpl')
    html = t.render(Context({
-        'version': remote.version(token), 
+        'version': remote.version(remote.token), 
         'username':username
    }))
    return HttpResponse(html)
@@ -445,11 +419,11 @@ def generic_rename(request, what, obj_name=None, obj_newname=None):
       return error_page(request,"You must specify a %s to rename" % what)
    if not remote.has_item(what,obj_name):
       return error_page(request,"Unknown %s specified" % what)
-   elif not remote.check_access_no_fail(token, "modify_%s" % what, obj_name):
+   elif not remote.check_access_no_fail(remote.token, "modify_%s" % what, obj_name):
       return error_page(request,"You do not have permission to rename this %s" % what)
    else:
-      obj_id = remote.get_item_handle(what, obj_name, token)
-      remote.rename_item(what, obj_id, obj_newname, token)
+      obj_id = remote.get_item_handle(what, obj_name, remote.token)
+      remote.rename_item(what, obj_id, obj_newname, remote.token)
       return HttpResponseRedirect("/cobbler_web/%s/list" % what)
 
 # ======================================================================
@@ -464,11 +438,11 @@ def generic_copy(request, what, obj_name=None, obj_newname=None):
       return error_page(request,"You must specify a %s to rename" % what)
    if not remote.has_item(what,obj_name):
       return error_page(request,"Unknown %s specified" % what)
-   elif not remote.check_access_no_fail(token, "modify_%s" % what, obj_name):
+   elif not remote.check_access_no_fail(remote.token, "modify_%s" % what, obj_name):
       return error_page(request,"You do not have permission to copy this %s" % what)
    else:
-      obj_id = remote.get_item_handle(what, obj_name, token)
-      remote.copy_item(what, obj_id, obj_newname, token)
+      obj_id = remote.get_item_handle(what, obj_name, remote.token)
+      remote.copy_item(what, obj_id, obj_newname, remote.token)
       return HttpResponseRedirect("/cobbler_web/%s/list" % what)
 
 # ======================================================================
@@ -483,10 +457,10 @@ def generic_delete(request, what, obj_name=None):
       return error_page(request,"You must specify a %s to delete" % what)
    if not remote.has_item(what,obj_name):
       return error_page(request,"Unknown %s specified" % what)
-   elif not remote.check_access_no_fail(token, "remove_%s" % what, obj_name):
+   elif not remote.check_access_no_fail(remote.token, "remove_%s" % what, obj_name):
       return error_page(request,"You do not have permission to delete this %s" % what)
    else:  
-      remote.remove_item(what, obj_name, token)
+      remote.remove_item(what, obj_name, remote.token)
       return HttpResponseRedirect("/cobbler_web/%s/list" % what)
 
 
@@ -509,7 +483,7 @@ def generic_domulti(request, what, multi_mode=None, multi_arg=None):
 
     if multi_mode == "delete":
          for obj_name in names:
-            remote.remove_item(what,obj_name, token)
+            remote.remove_item(what,obj_name, remote.token)
     elif what == "system" and multi_mode == "netboot":
         netboot_enabled = multi_arg # values: enable or disable
         if netboot_enabled is None:
@@ -521,17 +495,17 @@ def generic_domulti(request, what, multi_mode=None, multi_arg=None):
         else:
             return error_page(request,"Invalid netboot option, expect enable or disable")
         for obj_name in names:
-            obj_id = remote.get_system_handle(obj_name, token)
-            remote.modify_system(obj_id, "netboot_enabled", netboot_enabled, token)
-            remote.save_system(obj_id, token, "edit")
+            obj_id = remote.get_system_handle(obj_name, remote.token)
+            remote.modify_system(obj_id, "netboot_enabled", netboot_enabled, remote.token)
+            remote.save_system(obj_id, remote.token, "edit")
     elif what == "system" and multi_mode == "profile":
         profile = multi_arg
         if profile is None:
             return error_page(request,"Cannot modify systems without specifying profile")
         for obj_name in names:
-            obj_id = remote.get_system_handle(obj_name, token)
-            remote.modify_system(obj_id, "profile", profile, token)
-            remote.save_system(obj_id, token, "edit")
+            obj_id = remote.get_system_handle(obj_name, remote.token)
+            remote.modify_system(obj_id, "profile", profile, remote.token)
+            remote.save_system(obj_id, remote.token, "edit")
     elif what == "system" and multi_mode == "power":
         # FIXME: power should not loop, but send the list of all systems
         # in one set.
@@ -539,10 +513,10 @@ def generic_domulti(request, what, multi_mode=None, multi_arg=None):
         if power is None:
             return error_page(request,"Cannot modify systems without specifying power option")
         options = { "systems" : names, "power" : power }
-        remote.background_power_system(options, token)
+        remote.background_power_system(options, remote.token)
     elif what == "profile" and multi_mode == "reposync":
         options = { "repos" : names, "tries" : 3 }
-        remote.background_reposync(options,token)
+        remote.background_reposync(options,remote.token)
     else:
         return error_page(request,"Unknown batch operation on %ss: %s" % (what,str(multi_mode)))
 
@@ -566,7 +540,7 @@ def check(request):
    Shows a page with the results of 'cobbler check'
    """
    check_auth(request)
-   results = remote.check(token)
+   results = remote.check(remote.token)
    t = get_template('check.tmpl')
    html = t.render(Context({
        'username' : username,
@@ -578,7 +552,7 @@ def check(request):
 
 def buildiso(request):
     check_auth(request)
-    remote.background_buildiso({},token)
+    remote.background_buildiso({},remote.token)
     return HttpResponseRedirect('/cobbler_web/task_created')
 
 # ======================================================================
@@ -591,7 +565,7 @@ def import_run(request):
         "breed" : request.POST.get("breed",""),
         "arch"  : request.POST.get("arch","") 
         }
-    remote.background_import(options,token)
+    remote.background_import(options,remote.token)
     return HttpResponseRedirect('/cobbler_web/task_created')
 
 # ======================================================================
@@ -601,7 +575,7 @@ def ksfile_list(request, page=None):
    List all kickstart templates and link to their edit pages.
    """
    check_auth(request)
-   ksfiles = remote.get_kickstart_templates(token)
+   ksfiles = remote.get_kickstart_templates(remote.token)
 
    ksfile_list = []
    for ksfile in ksfiles:
@@ -636,9 +610,9 @@ def ksfile_edit(request, ksfile_name=None, editmode='edit'):
    deleteable = False
    ksdata = ""
    if not ksfile_name is None:
-      editable = remote.check_access_no_fail(token, "modify_kickstart", ksfile_name)
-      deleteable = not remote.is_kickstart_in_use(ksfile_name, token)
-      ksdata = remote.read_or_write_kickstart_template(ksfile_name, True, "", token)
+      editable = remote.check_access_no_fail(remote.token, "modify_kickstart", ksfile_name)
+      deleteable = not remote.is_kickstart_in_use(ksfile_name, remote.token)
+      ksdata = remote.read_or_write_kickstart_template(ksfile_name, True, "", remote.token)
 
    t = get_template('ksfile_edit.tmpl')
    html = t.render(Context({
@@ -673,10 +647,10 @@ def ksfile_save(request):
    delete2   = request.POST.get('delete2', None)
 
    if delete1 and delete2:
-      remote.read_or_write_kickstart_template(ksfile_name, False, -1, token)
+      remote.read_or_write_kickstart_template(ksfile_name, False, -1, remote.token)
       return HttpResponseRedirect('/cobbler_web/ksfile/list')
    else:
-      remote.read_or_write_kickstart_template(ksfile_name,False,ksdata,token)
+      remote.read_or_write_kickstart_template(ksfile_name,False,ksdata,remote.token)
       return HttpResponseRedirect('/cobbler_web/ksfile/edit/%s' % ksfile_name)
 
 # ======================================================================
@@ -686,7 +660,7 @@ def snippet_list(request, page=None):
    This page lists all available snippets and has links to edit them.
    """
    check_auth(request)
-   snippets = remote.get_snippets(token)
+   snippets = remote.get_snippets(remote.token)
 
    snippet_list = []
    for snippet in snippets:
@@ -717,9 +691,9 @@ def snippet_edit(request, snippet_name=None, editmode='edit'):
    deleteable = False
    snippetdata = ""
    if not snippet_name is None:
-      editable = remote.check_access_no_fail(token, "modify_snippet", snippet_name)
+      editable = remote.check_access_no_fail(remote.token, "modify_snippet", snippet_name)
       deleteable = True
-      snippetdata = remote.read_or_write_snippet(snippet_name, True, "", token)
+      snippetdata = remote.read_or_write_snippet(snippet_name, True, "", remote.token)
 
    t = get_template('snippet_edit.tmpl')
    html = t.render(Context({
@@ -754,10 +728,10 @@ def snippet_save(request):
    delete2   = request.POST.get('delete2', None)
 
    if delete1 and delete2:
-      remote.read_or_write_snippet(snippet_name, False, -1, token)
+      remote.read_or_write_snippet(snippet_name, False, -1, remote.token)
       return HttpResponseRedirect('/cobbler_web/snippet/list')
    else:
-      remote.read_or_write_snippet(snippet_name,False,snippetdata,token)
+      remote.read_or_write_snippet(snippet_name,False,snippetdata,remote.token)
       return HttpResponseRedirect('/cobbler_web/snippet/edit/%s' % snippet_name)
 
 # ======================================================================
@@ -844,7 +818,7 @@ def random_mac(request, virttype="xenpv"):
    """
    # FIXME: not exposed in UI currently
    check_auth(request)
-   random_mac = remote.get_random_mac(virttype, token)
+   random_mac = remote.get_random_mac(virttype, remote.token)
    return HttpResponse(random_mac)
 
 # ======================================================================
@@ -854,7 +828,7 @@ def sync(request):
    Runs 'cobbler sync' from the API when the user presses the sync button.
    """
    check_auth(request)
-   remote.background_sync({"verbose":"True"},token)
+   remote.background_sync({"verbose":"True"},remote.token)
    return HttpResponseRedirect("/cobbler_web/task_created")
 
 # ======================================================================
@@ -864,7 +838,7 @@ def reposync(request):
    Syncs all repos that are configured to be synced.
    """
    check_auth(request)
-   remote.background_reposync({ "names":"", "tries" : 3},token)
+   remote.background_reposync({ "names":"", "tries" : 3},remote.token)
    return HttpResponseRedirect("/cobbler_web/task_created")
 
 # ======================================================================
@@ -874,7 +848,7 @@ def hardlink(request):
    Hardlinks files between repos and install trees to save space.
    """
    check_auth(request)
-   remote.background_hardlink({},token)
+   remote.background_hardlink({},remote.token)
    return HttpResponseRedirect("/cobbler_web/task_created")
 
 # ======================================================================
@@ -890,7 +864,7 @@ def replicate(request):
    """
    #settings = remote.get_settings()
    #options = settings # just load settings from file until we decide to ask user (later?)
-   #remote.background_replicate(options, token)
+   #remote.background_replicate(options, remote.token)
    check_auth(request)
    return HttpResponseRedirect("/cobbler_web/task_created")
 
@@ -930,7 +904,7 @@ def generic_edit(request, what=None, obj_name=None, editmode="new"):
    
 
    if not obj_name is None:
-      editable = remote.check_access_no_fail(token, "modify_%s" % what, obj_name)
+      editable = remote.check_access_no_fail(remote.token, "modify_%s" % what, obj_name)
       obj = remote.get_item(what, obj_name, True)
    #
    #   if obj.has_key('ctime'):
@@ -939,7 +913,7 @@ def generic_edit(request, what=None, obj_name=None, editmode="new"):
    #      obj['mtime'] = time.ctime(obj['mtime'])
 
    else:
-       editable = remote.check_access_no_fail(token, "new_%s" % what, None)
+       editable = remote.check_access_no_fail(remote.token, "new_%s" % what, None)
        obj = None
 
 
@@ -1011,11 +985,11 @@ def generic_save(request,what):
     if editmode == "edit":
         if not remote.has_item(what, obj_name):
             return error_page(request,"Failure trying to access item %s, it may have been deleted." % (obj_name))
-        obj_id = remote.get_item_handle( what, obj_name, token )
+        obj_id = remote.get_item_handle( what, obj_name, remote.token )
     else:
         if remote.has_item(what, obj_name):
             return error_page(request,"Could not create a new item %s, it already exists." % (obj_name))
-        obj_id = remote.new_item( what, token )
+        obj_id = remote.new_item( what, remote.token )
 
     # walk through our fields list saving things we know how to save
     fields = get_fields(what, subobject)
@@ -1051,7 +1025,7 @@ def generic_save(request,what):
                     value = ""
                 if value is not None and (not subobject or field['name'] != 'distro'):
                     try:
-                        remote.modify_item(what,obj_id,field['name'],value,token)
+                        remote.modify_item(what,obj_id,field['name'],value,remote.token)
                     except Exception, e:
                         return error_page(request, str(e))                
 
@@ -1076,14 +1050,14 @@ def generic_save(request,what):
             original = request.POST.get("original-%s" % interface, "") 
             try:
                 if present == "0" and original == "1":
-                    remote.modify_system(obj_id, 'delete_interface', interface, token)
+                    remote.modify_system(obj_id, 'delete_interface', interface, remote.token)
                 elif present == "1":
-                    remote.modify_system(obj_id, 'modify_interface', ifdata, token)
+                    remote.modify_system(obj_id, 'modify_interface', ifdata, remote.token)
             except Exception, e:
                 return error_page(request, str(e))
 
     try:
-        remote.save_item(what, obj_id, token, editmode)
+        remote.save_item(what, obj_id, remote.token, editmode)
     except Exception, e:
         return error_page(request, str(e))
 
