@@ -22,13 +22,14 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 """
 
 import yaml
-import xmlrpclib
 import unittest
 import traceback
+import xmlrpclib
 import random
 import commands
 import urlgrabber
 import os.path
+import cobbler.new_api as api
 
 cfg = None
 
@@ -87,9 +88,9 @@ class CobblerTest(unittest.TestCase):
         """
         Sets up Cobbler API connection and logs in
         """
-        self.api = xmlrpclib.Server("http://%s/cobbler_api" % cfg["cobbler_server"])
-        self.token = self.api.login(cfg["cobbler_user"],
-            cfg["cobbler_pass"])
+        self.api = api.CobblerAPI(username=cfg["cobbler_user"],
+            password=cfg["cobbler_pass"])
+        self.token = self.api.token
 
         # Store object names to clean up in teardown. Be sure not to 
         # store anything in here unless we're sure it was successfully

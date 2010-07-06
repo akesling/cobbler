@@ -9,8 +9,12 @@ except ImportError:
 
 class CobblerAPI(xmlrpclib.Server, object):
     
-    def __init__(self, url=None, username=None, password=None, *args, **kwargs):
-        if not url: url = settings.cobbler_url
+    def __init__(self, username=None, password=None, url=None, hostname=None, *args, **kwargs):
+        if not url: 
+            if not hostname:
+                url = settings.cobbler_url
+            else:
+                url = settings.default_url % (hostname, "80")
         self._url = url
         
         if utils and settings.run_local:
