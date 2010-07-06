@@ -29,7 +29,7 @@ import random
 import commands
 import urlgrabber
 import os.path
-import cobbler.new_api as api
+import cobbler.api as api
 
 cfg = None
 

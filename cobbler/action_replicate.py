@@ -24,7 +24,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 import os
 import os.path
 import xmlrpclib
-import api as cobbler_api
+import core as cobbler_api
 import utils
 from utils import _
 from cexceptions import *

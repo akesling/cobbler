@@ -31,7 +31,7 @@ import signal
 import time
 
 from cexceptions import *
-import api as cobbler_api
+import core as cobbler_api
 
 LOCK_ENABLED = True
 LOCK_HANDLE = None

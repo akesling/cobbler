@@ -31,7 +31,7 @@ import xmlrpclib
 import binascii
 import utils
 
-import api as cobbler_api
+import core as cobbler_api
 import yaml # Howell Clark version
 import utils
 import remote

@@ -21,7 +21,7 @@ import logging
 import cobbler.utils as utils
 import traceback
 import optparse
-import cobbler.api as cobbler_api
+import cobbler.core as cobbler_api
 
 def daemonize_self():
     # daemonizing code:  http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/66012

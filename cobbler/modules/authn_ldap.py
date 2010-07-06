@@ -35,7 +35,7 @@ sys.path.insert(0, mod_path)
 
 import cexceptions
 import utils
-import api as cobbler_api
+import core as cobbler_api
 
 def register():
     """

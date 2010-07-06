@@ -38,7 +38,7 @@ try:
     import subprocess as sub_process
 except:
     import sub_process
-import api as cobbler_api
+import core as cobbler_api
 import utils
 import os
 import os.path

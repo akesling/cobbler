@@ -20,7 +20,7 @@ import cobbler.item_repo    as item_repo
 import cobbler.item_image   as item_image
 import cobbler.field_info   as field_info
 import cobbler.utils        as utils
-import cobbler.new_api      as api
+import cobbler.api          as api
 
 remote = None
 username = None

@@ -28,7 +28,7 @@ import os.path
 import re
 import traceback
 import glob
-import api
+import core
 import utils
 import shutil
 from utils import _
@@ -51,7 +51,7 @@ class Importer:
         cobbler's http directory.  This is explained in more detail
         in the manpage.  Leave network_root to None if want mirroring.
         """
-        self.api = api
+        self.api = core
         self.config = config
         self.mirror = mirror
         self.mirror_name = mirror_name

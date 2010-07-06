@@ -35,7 +35,7 @@ except:
     import sub_process as subprocess
 from threading import Thread
 
-import api as cobbler_api
+import core as cobbler_api
 import utils
 from cexceptions import *
 import item_distro

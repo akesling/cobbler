@@ -25,7 +25,7 @@ import os
 import os.path
 import glob
 import time
-import api as cobbler_api
+import core as cobbler_api
 import clogger
 import utils
 

@@ -28,7 +28,7 @@ import exceptions
 import time
 import os
 
-import new_api
+import api
 import utils
 import module_loader
 import item_distro
@@ -103,7 +103,7 @@ class BootCLI:
     def __init__(self):
         # FIXME: allow specifying other endpoints, and user+pass
         self.parser        = optparse.OptionParser()
-        self.remote        = new_api.CobblerAPI()
+        self.remote        = api.CobblerAPI()
 
     def start_task(self, name, options):
         options = utils.strip_none(vars(options), omit_none=True)
@@ -157,17 +157,17 @@ class BootCLI:
         #
         # FIXME: This check should be rewritten to be runnable
         # remotely.
-        if not new_api.settings.run_local:
+        if not api.settings.run_local:
             return None
         
-        s = new_api.CobblerAPI(url="http://127.0.0.1:%s" % (new_api.settings.xmlrpc_port))
+        s = api.CobblerAPI(url="http://127.0.0.1:%s" % (api.settings.xmlrpc_port))
         try:
             s.ping()
         except:
             print >> sys.stderr, "cobblerd does not appear to be running/accessible" 
             sys.exit(411)
 
-        s = new_api.CobblerAPI()
+        s = api.CobblerAPI()
         try:
             s.ping()
         except:
