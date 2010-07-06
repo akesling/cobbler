@@ -27,11 +27,56 @@ class SystemTests(CobblerTest):
         (self.distro_id, self.distro_name) = self.create_distro()
         (self.profile_id, self.profile_name) = self.create_profile(self.distro_name)
 
-    def test_create_system(self):
+    def test_new_working_system(self):
         """ Test creation of a cobbler system. """
         (system_id, system_name) = self.create_system(self.profile_name)
         systems = self.api.find_system({'name': system_name})
         self.assertTrue(len(systems) > 0)
+        return system_id, system_name
+    
+    def test_new_nonworking_system(self):
+        """
+        Attempt to create a system lacking required information.
+        """
+        system_id = self.api.new_system(self.token)
+        self.api.modify_profile(system_id, "name", "%s%s" % (TEST_SYSTEM_PREFIX, random.randint(1, 1000000)), self.token)
+        self.assertFalse(self.api.save_system(system_id, self.token))
+    
+    def test_remove_system(self):
+        """
+        Attempt to remove a cobbler system.
+        """
+        system_id, system_name = self.test_new_working_system()
+        self.api.remove_system(system_name, self.token)
+        self.assertTrue(self.api.find_system({'name': system_name}) == [])
+    
+    def test_copy_system(self):
+        """
+        Attempt to copy a cobbler system.
+        """
+        system_id, system_name = self.test_new_working_system()
+        result, new_name = self.copy_system(system_id)
+        self.assertTrue(self.api.find_system({'name': new_name}) != [])
+
+        return (system_id, system_name), (new_name)
+    
+    def test_rename_system(self):
+        """
+        Attempt to copy a cobbler system.
+        """
+        system_id, system_name = self.test_new_working_system()
+        result, new_name = self.rename_system(system_id)
+        self.assertTrue(self.api.find_system({'name': new_name}) != [])
+
+        return (system_id, system_name), (new_name)
+    
+    def test_new_system_without_token(self):
+        """
+        Attempt to run new_system method without supplying authenticated token
+        """
+        self.assertRaises(xmlrpclib.Fault, self.api.new_system)
+
+
         
     # Old tests laying around indicate this should pass, but it no longer seems too?
     #def test_nopxe(self):

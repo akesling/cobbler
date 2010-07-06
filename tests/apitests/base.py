@@ -150,12 +150,38 @@ class CobblerTest(unittest.TestCase):
         self.assertNotEquals(-1, data.find(distro_dict['name']))
 
         return (did, distro_dict['name'])
+    
+    def remove_distro(self, distro_name):
+        """
+        Remove the given distro.
+        """
+        return self.api.remove_distro(distro_name, self.token)
+    
+    def copy_distro(self, distro_id):
+        """
+        Copy the given distro and return (success, copy's name).
+        """
+        new_name = "%s%s" % (TEST_DISTRO_PREFIX, random.randint(1, 1000000))
+        success = self.api.copy_distro(distro_id, new_name, self.token)
+        if success:
+            self.cleanup_distros.append(new_name)
+        return success, new_name
+    
+    def rename_distro(self, distro_id):
+        """
+        Renam the given distro and return (success, copy's name).
+        """
+        new_name = "%s%s" % (TEST_DISTRO_PREFIX, random.randint(1, 1000000))
+        success = self.api.rename_distro(distro_id, new_name, self.token)
+        if success:
+            self.cleanup_distros.append(new_name)
+        return success, new_name
 
     def create_profile(self, distro_name, profile_dict=None):
         """
         Create a test profile with random name associated with the given distro.
 
-        Returns a tuple of profile ID and name.
+        Returns (profile ID, profile name).
         """
         if not profile_dict:
             profile_name = "%s%s" % (TEST_PROFILE_PREFIX, random.randint(1, 1000000))
@@ -200,24 +226,66 @@ class CobblerTest(unittest.TestCase):
         self.assertNotEquals(-1, data.find(profile_dict['name']))
 
         return (profile_id, profile_dict['name'])
+    
+    def copy_profile(self, profile_id):
+        """
+        Copy the given profile and return (success, copy's name).
+        """
+        new_name = "%s%s" % (TEST_PROFILE_PREFIX, random.randint(1, 1000000))
+        success = self.api.copy_profile(profile_id, new_name, self.token)
+        if success:
+            self.cleanup_profiles.append(new_name)
+        return success, new_name
+    
+    def rename_profile(self, profile_id):
+        """
+        Rename the given profile and return (success, copy's name).
+        """
+        new_name = "%s%s" % (TEST_PROFILE_PREFIX, random.randint(1, 1000000))
+        success = self.api.rename_profile(profile_id, new_name, self.token)
+        if success:
+            self.cleanup_profiles.append(new_name)
+        return success, new_name
 
     def create_system(self, profile_name, system_dict=None):
         """ 
         Create a system record. 
         
-        Returns a tuple of system name
+        Returns (system id, system name).
         """
         if not system_dict:
             system_dict = {
                 "name" : "%s%s" % (TEST_SYSTEM_PREFIX, random.randint(1, 1000000)),
                 "profile" : profile_name,
             }
+        else:
+            system_dict['profile'] = profile_name
         
         system_id = self.api.new_system(self.token)
         for attr, val in system_dict.items():
             self.api.modify_system(system_id, attr, val, self.token)
         self.api.save_system(system_id, self.token)
+        
         return (system_id, system_dict['name'])
 
+    def copy_system(self, system_id):
+        """
+        Copy the given system and return (success, copy's name).
+        """
+        new_name = "%s%s" % (TEST_SYSTEM_PREFIX, random.randint(1, 1000000))
+        success = self.api.copy_system(system_id, new_name, self.token)
+        if success:
+            self.cleanup_systems.append(new_name)
+        return success, new_name
+    
+    def rename_system(self, system_id):
+        """
+        Rename the given system and return (success, copy's name).
+        """
+        new_name = "%s%s" % (TEST_SYSTEM_PREFIX, random.randint(1, 1000000))
+        success = self.api.rename_system(system_id, new_name, self.token)
+        if success:
+            self.cleanup_systems.append(new_name)
+        return success, new_name
         
     
