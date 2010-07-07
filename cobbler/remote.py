@@ -595,8 +595,334 @@ class CobblerXMLRPCInterface:
         return True
     
     
+    def get_distros_since(self,mtime):
+        """
+        Return all of the distro objects that have been modified
+        after mtime.
+        """
+        data = self.api.get_distros_since(mtime, collapse=True)
+        return self.xmlrpc_hacks(data)
+
+    
+    def get_profiles_since(self,mtime):
+        """
+        See documentation for get_distros_since
+        """
+        data = self.api.get_profiles_since(mtime, collapse=True)
+        return self.xmlrpc_hacks(data)
+    
+    
+    def get_systems_since(self,mtime):
+        """
+        See documentation for get_distros_since
+        """
+        data = self.api.get_systems_since(mtime, collapse=True)
+        return self.xmlrpc_hacks(data)
+    
+    
+    def get_repos_since(self,mtime):
+        """
+        See documentation for get_distros_since
+        """
+        data = self.api.get_repos_since(mtime, collapse=True)
+        return self.xmlrpc_hacks(data)
+    
+    
+    def get_images_since(self,mtime):
+        """
+        See documentation for get_distros_since
+        """
+        data = self.api.get_images_since(mtime, collapse=True)
+        return self.xmlrpc_hacks(data)
+    
+    
+    def get_repos_compatible_with_profile(self,profile=None,token=None,**rest):
+        """
+        Get repos that can be used with a given profile name
+        """
+        self._log("get_repos_compatible_with_profile",token=token)
+        profile = self.api.find_profile(profile)
+        if profile is None:
+            return -1
+        results = []
+        distro = profile.get_conceptual_parent()
+        repos = self.get_repos()
+        for r in repos:
+           # there be dragons!
+           # accept all repos that are src/noarch
+           # but otherwise filter what repos are compatible
+           # with the profile based on the arch of the distro.
+           if r["arch"] is None or r["arch"] in [ "", "noarch", "src" ]:
+              results.append(r)
+           else:
+              # some backwards compatibility fuzz
+              # repo.arch is mostly a text field
+              # distro.arch is i386/x86_64/ia64/s390x/etc
+              if r["arch"] in [ "i386", "x86", "i686" ]:
+                  if distro.arch in [ "i386", "x86" ]:
+                      results.append(r)
+              elif r["arch"] in [ "x86_64" ]:
+                  if distro.arch in [ "x86_64" ]:
+                      results.append(r)
+              elif r["arch"].startswith("s390"):
+                  if distro.arch in [ "s390x" ]:
+                      results.append(r)
+              else:
+                  if distro.arch == r["arch"]:
+                      results.append(r)
+        return results    
+              
+    
+    # this is used by the puppet external nodes feature
+    def find_system_by_dns_name(self,dns_name):
+        # FIXME: implement using api.py's find API
+        # and expose generic finds for other methods
+        # WARNING: this function is /not/ expected to stay in cobbler long term
+        systems = self.get_systems()
+        for x in systems:
+           for y in x["interfaces"]:
+              if x["interfaces"][y]["dns_name"] == dns_name:
+                  name = x["name"]
+                  return self.get_system_for_koan(name)
+        return {}
+    
+    
+    def get_distro_as_rendered(self,name,token=None,**rest):
+        """
+        Return the distribution as passed through cobbler's
+        inheritance/graph engine.  Shows what would be installed, not
+        the input data.
+        """
+        self._log("get_distro_as_rendered",name=name,token=token)
+        obj = self.api.find_distro(name=name)
+        if obj is not None:
+            return self.xmlrpc_hacks(utils.blender(self.api, True, obj))
+        return self.xmlrpc_hacks({})
+    
+    
+    def get_profile_as_rendered(self,name,token=None,**rest):
+        """
+        Return the profile as passed through cobbler's
+        inheritance/graph engine.  Shows what would be installed, not
+        the input data.
+        """
+        self._log("get_profile_as_rendered", name=name, token=token)
+        obj = self.api.find_profile(name=name)
+        if obj is not None:
+            return self.xmlrpc_hacks(utils.blender(self.api, True, obj))
+        return self.xmlrpc_hacks({})
+    
+    
+    def get_system_as_rendered(self,name,token=None,**rest):
+        """
+        Return the system as passed through cobbler's
+        inheritance/graph engine.  Shows what would be installed, not
+        the input data.
+        """
+        self._log("get_system_as_rendered",name=name,token=token)
+        obj = self.api.find_system(name=name)
+        if obj is not None:
+            hash = utils.blender(self.api,True,obj)
+            # Generate a pxelinux.cfg?
+            image_based = False
+            profile = obj.get_conceptual_parent()
+            distro  = profile.get_conceptual_parent()
+            arch = distro.arch
+            if distro is None and profile.COLLECTION_TYPE == "profile":
+                image_based = True
+                arch = profile.arch
+
+            if obj.is_management_supported():
+                if not image_based:
+                    hash["pxelinux.cfg"] = self.pxegen.write_pxe_file(
+                        None, obj, profile, distro, arch)
+                else:
+                    hash["pxelinux.cfg"] = self.pxegen.write_pxe_file(
+                        None, obj,None,None,arch,image=profile)
+
+            return self.xmlrpc_hacks(hash)
+        return self.xmlrpc_hacks({})
+    
+    
+    def get_repo_as_rendered(self,name,token=None,**rest):
+        """
+        Return the repo as passed through cobbler's
+        inheritance/graph engine.  Shows what would be installed, not
+        the input data.
+        """
+        self._log("get_repo_as_rendered",name=name,token=token)
+        obj = self.api.find_repo(name=name)
+        if obj is not None:
+            return self.xmlrpc_hacks(utils.blender(self.api, True, obj))
+        return self.xmlrpc_hacks({})
+    
+    
+    def get_image_as_rendered(self,name,token=None,**rest):
+        """
+        Return the image as passed through cobbler's
+        inheritance/graph engine.  Shows what would be installed, not
+        the input data.
+        """
+        self._log("get_image_as_rendered",name=name,token=token)
+        obj = self.api.find_image(name=name)
+        if obj is not None:
+            return self.xmlrpc_hacks(utils.blender(self.api, True, obj))
+        return self.xmlrpc_hacks({})
+    
+    
+    def is_kickstart_in_use(self,ks,token=None,**rest):
+        self._log("is_kickstart_in_use",token=token)
+        for x in self.api.profiles():
+           if x.kickstart is not None and x.kickstart == ks:
+               return True
+        for x in self.api.systems():
+           if x.kickstart is not None and x.kickstart == ks:
+               return True
+        return False
+    
+    
+    def generate_kickstart(self,profile=None,system=None,REMOTE_ADDR=None,REMOTE_MAC=None,**rest):
+        self._log("generate_kickstart")
+        return self.api.generate_kickstart(profile,system)
+    
+    
+    def get_blended_data(self,profile=None,system=None):
+        if profile is not None and profile != "":
+            obj = self.api.find_profile(profile)
+            if obj is None:
+                raise CX("profile not found: %s" % profile)
+        elif system is not None and system != "":
+            obj = self.api.find_system(system)
+            if obj is None:
+                raise CX("system not found: %s" % system)
+        else:
+            raise CX("internal error, no system or profile specified")
+        return self.xmlrpc_hacks(utils.blender(self.api, True, obj))
+    
+    
 ###############################################################################
-## Background Task Methods ####################################################
+## Authentication/Authorization Methods #######################################
+    
+    
+    def login(self,login_user,login_password):
+        """
+        Takes a username and password, validates it, and if successful
+        returns a random login token which must be used on subsequent
+        method calls.  The token will time out after a set interval if not
+        used.  Re-logging in permitted.
+        """
+       
+        # if shared secret access is requested, don't bother hitting the auth
+        # plugin
+        if login_user == "":
+            if login_password == self.shared_secret:
+                return self.__make_token("<DIRECT>")
+            else:
+                utils.die(self.logger, "login failed")
+        
+        # this should not log to disk OR make events as we're going to
+        # call it like crazy in CobblerWeb.  Just failed attempts.
+        if self.__validate_user(login_user,login_password):
+            token = self.__make_token(login_user)
+            return token
+        else:
+            utils.die(self.logger, "login failed (%s)" % login_user)
+    
+    
+    def logout(self,token):
+        """
+        Retires a token ahead of the timeout.
+        """
+        self._log("logout", token=token)
+        if self.token_cache.has_key(token):
+            del self.token_cache[token]
+            return True
+        return False    
+    
+    
+    def get_user_from_token(self,token):
+        """
+        Given a token returned from login, return the username
+        that logged in with it.
+        """
+        if not self.token_cache.has_key(token):
+            raise CX("invalid token: %s" % token)
+        else:
+            return self.token_cache[token][1]
+    
+    
+    def __validate_token(self,token): 
+        """
+        Checks to see if an API method can be called when
+        the given token is passed in.  Updates the timestamp
+        of the token automatically to prevent the need to
+        repeatedly call login().  Any method that needs
+        access control should call this before doing anything
+        else.
+        """
+        self.__invalidate_expired_tokens()
+        
+        if self.token_cache.has_key(token):
+            user = self.get_user_from_token(token)
+            if user == "<system>":
+               # system token is only valid over Unix socket
+               return False
+            self.token_cache[token] = (time.time(), user) # update to prevent timeout
+            return True
+        else:
+            self._log("invalid token",token=token)
+            raise CX("invalid token: %s" % token)
+    
+    
+    def token_check(self,token):
+        """
+        This is a demo function that does not return anything useful.
+        """
+        self.__validate_token(token)
+        return True
+    
+    
+    def check_access(self,token,resource,arg1=None,arg2=None):
+        validated = self.__validate_token(token)
+        user = self.get_user_from_token(token)
+        if user == "<DIRECT>":
+            self._log("CLI Authorized", debug=True)
+            return True
+        rc = self.api.authorize(user,resource,arg1,arg2)
+        self._log("%s authorization result: %s" % (user,rc),debug=True)
+        if not rc:
+            raise CX("authorization failure for user %s" % user) 
+        return rc
+    
+    
+    def check_access_no_fail(self,token,resource,arg1=None,arg2=None):
+        """
+        This is called by the WUI to decide whether an element
+        is editable or not. It differs from check_access in that
+        it is supposed to /not/ log the access checks (TBA) and does
+        not raise exceptions.
+        """
+        
+        need_remap = False
+        for x in [ "distro", "profile", "system", "repo", "image" ]:
+           if arg1 is not None and resource.find(x) != -1:
+              need_remap = True
+              break
+        
+        if need_remap:
+           # we're called with an object name, but need an object
+           arg1 = self.__name_to_object(resource,arg1)
+        
+        try:
+           self.check_access(token,resource,arg1,arg2)
+           return True 
+        except:
+           utils.log_exc(self.logger)
+           return False 
+    
+    
+###############################################################################
+## Task Related Methods #######################################################
     
     
     def background_buildiso(self, options, token):
@@ -714,6 +1040,25 @@ class CobblerXMLRPCInterface:
         return self.__start_task(runner, token, "reposync", "Reposync", options)
     
     
+    def power_system(self,object_id,power=None,token=None,logger=None):
+        """
+        Internal implementation used by background_power, do not call
+        directly if possible.  
+        Allows poweron/poweroff/reboot of a system specified by object_id.
+        """
+        obj = self.__get_object(object_id)
+        self.check_access(token, "power_system", obj)
+        if power=="on":
+            rc=self.api.power_on(obj, user=None, password=None, logger=logger)
+        elif power=="off":
+            rc=self.api.power_off(obj, user=None, password=None, logger=logger)
+        elif power=="reboot":
+            rc=self.api.reboot(obj, user=None, password=None, logger=logger)
+        else:
+            utils.die(self.logger, "invalid power mode '%s', expected on/off/reboot" % power)
+        return rc
+    
+    
     def background_power_system(self, options, token):
         def runner(self):
             for x in self.options.get("systems",[]):
@@ -722,367 +1067,6 @@ class CobblerXMLRPCInterface:
             return True
         self.check_access(token, "power")
         return self.__start_task(runner, token, "power", "Power management (%s)" % options.get("power",""), options)
-    
-    
-###############################################################################
-## Other Assorted Methods #####################################################
-    
-    def run_install_triggers(self,mode,objtype,name,ip,token=None,**rest):
-        
-        """
-        This is a feature used to run the pre/post install triggers.
-        See CobblerTriggers on Wiki for details
-        """
-        
-        self._log("run_install_triggers",token=token)
-        
-        if mode != "pre" and mode != "post":
-            return False
-        if objtype != "system" and objtype !="profile":
-            return False
-        
-        # the trigger script is called with name,mac, and ip as arguments 1,2, and 3
-        # we do not do API lookups here because they are rather expensive at install
-        # time if reinstalling all of a cluster all at once.
-        # we can do that at "cobbler check" time.
-        
-        utils.run_triggers(self.api, None, "/var/lib/cobbler/triggers/install/%s/*" % mode, additional=[objtype,name,ip],logger=self.logger)
-        
-        
-        return True
-    
-    
-    def version(self,token=None,**rest):
-        """
-        Return the cobbler version for compatibility testing with remote applications.
-        See api.py for documentation.
-        """
-        self._log("version",token=token)
-        return self.api.version()
-    
-    
-    def extended_version(self,token=None,**rest):
-        """
-        Returns the full dictionary of version information.  See api.py for documentation.
-        """
-        self._log("version",token=token)
-        return self.api.version(extended=True)
-    
-    
-    def get_distros_since(self,mtime):
-        """
-        Return all of the distro objects that have been modified
-        after mtime.
-        """
-        data = self.api.get_distros_since(mtime, collapse=True)
-        return self.xmlrpc_hacks(data)
-
-    
-    def get_profiles_since(self,mtime):
-        """
-        See documentation for get_distros_since
-        """
-        data = self.api.get_profiles_since(mtime, collapse=True)
-        return self.xmlrpc_hacks(data)
-    
-    
-    def get_systems_since(self,mtime):
-        """
-        See documentation for get_distros_since
-        """
-        data = self.api.get_systems_since(mtime, collapse=True)
-        return self.xmlrpc_hacks(data)
-    
-    
-    def get_repos_since(self,mtime):
-        """
-        See documentation for get_distros_since
-        """
-        data = self.api.get_repos_since(mtime, collapse=True)
-        return self.xmlrpc_hacks(data)
-    
-    
-    def get_images_since(self,mtime):
-        """
-        See documentation for get_distros_since
-        """
-        data = self.api.get_images_since(mtime, collapse=True)
-        return self.xmlrpc_hacks(data)
-    
-    
-    def get_repos_compatible_with_profile(self,profile=None,token=None,**rest):
-        """
-        Get repos that can be used with a given profile name
-        """
-        self._log("get_repos_compatible_with_profile",token=token)
-        profile = self.api.find_profile(profile)
-        if profile is None:
-            return -1
-        results = []
-        distro = profile.get_conceptual_parent()
-        repos = self.get_repos()
-        for r in repos:
-           # there be dragons!
-           # accept all repos that are src/noarch
-           # but otherwise filter what repos are compatible
-           # with the profile based on the arch of the distro.
-           if r["arch"] is None or r["arch"] in [ "", "noarch", "src" ]:
-              results.append(r)
-           else:
-              # some backwards compatibility fuzz
-              # repo.arch is mostly a text field
-              # distro.arch is i386/x86_64/ia64/s390x/etc
-              if r["arch"] in [ "i386", "x86", "i686" ]:
-                  if distro.arch in [ "i386", "x86" ]:
-                      results.append(r)
-              elif r["arch"] in [ "x86_64" ]:
-                  if distro.arch in [ "x86_64" ]:
-                      results.append(r)
-              elif r["arch"].startswith("s390"):
-                  if distro.arch in [ "s390x" ]:
-                      results.append(r)
-              else:
-                  if distro.arch == r["arch"]:
-                      results.append(r)
-        return results    
-              
-    
-    # this is used by the puppet external nodes feature
-    def find_system_by_dns_name(self,dns_name):
-        # FIXME: implement using api.py's find API
-        # and expose generic finds for other methods
-        # WARNING: this function is /not/ expected to stay in cobbler long term
-        systems = self.get_systems()
-        for x in systems:
-           for y in x["interfaces"]:
-              if x["interfaces"][y]["dns_name"] == dns_name:
-                  name = x["name"]
-                  return self.get_system_for_koan(name)
-        return {}
-    
-    
-    def get_distro_as_rendered(self,name,token=None,**rest):
-        """
-        Return the distribution as passed through cobbler's
-        inheritance/graph engine.  Shows what would be installed, not
-        the input data.
-        """
-        return self.get_distro_for_koan(self,name)
-    
-    
-    def get_distro_for_koan(self,name,token=None,**rest):
-        """
-        Same as get_distro_as_rendered.
-        """
-        self._log("get_distro_as_rendered",name=name,token=token)
-        obj = self.api.find_distro(name=name)
-        if obj is not None:
-            return self.xmlrpc_hacks(utils.blender(self.api, True, obj))
-        return self.xmlrpc_hacks({})
-
-    
-    def get_profile_as_rendered(self,name,token=None,**rest):
-        """
-        Return the profile as passed through cobbler's
-        inheritance/graph engine.  Shows what would be installed, not
-        the input data.
-        """
-        return self.get_profile_for_koan(name,token)
-    
-    
-    def get_profile_for_koan(self,name,token=None,**rest):
-        """
-        Same as get_profile_as_rendered
-        """
-        self._log("get_profile_as_rendered", name=name, token=token)
-        obj = self.api.find_profile(name=name)
-        if obj is not None:
-            return self.xmlrpc_hacks(utils.blender(self.api, True, obj))
-        return self.xmlrpc_hacks({})
-    
-    
-    def get_system_as_rendered(self,name,token=None,**rest):
-        """
-        Return the system as passed through cobbler's
-        inheritance/graph engine.  Shows what would be installed, not
-        the input data.
-        """
-        return self.get_system_for_koan(self,name)
-    
-    
-    def get_system_for_koan(self,name,token=None,**rest):
-        """
-        Same as get_system_as_rendered.
-        """
-        self._log("get_system_as_rendered",name=name,token=token)
-        obj = self.api.find_system(name=name)
-        if obj is not None:
-            hash = utils.blender(self.api,True,obj)
-            # Generate a pxelinux.cfg?
-            image_based = False
-            profile = obj.get_conceptual_parent()
-            distro  = profile.get_conceptual_parent()
-            arch = distro.arch
-            if distro is None and profile.COLLECTION_TYPE == "profile":
-                image_based = True
-                arch = profile.arch
-
-            if obj.is_management_supported():
-                if not image_based:
-                    hash["pxelinux.cfg"] = self.pxegen.write_pxe_file(
-                        None, obj, profile, distro, arch)
-                else:
-                    hash["pxelinux.cfg"] = self.pxegen.write_pxe_file(
-                        None, obj,None,None,arch,image=profile)
-
-            return self.xmlrpc_hacks(hash)
-        return self.xmlrpc_hacks({})
-    
-    
-    def get_repo_as_rendered(self,name,token=None,**rest):
-        """
-        Return the repo as passed through cobbler's
-        inheritance/graph engine.  Shows what would be installed, not
-        the input data.
-        """
-        return self.get_repo_for_koan(self,name)
-    
-    
-    def get_repo_for_koan(self,name,token=None,**rest):
-        """
-        Same as get_repo_as_rendered.
-        """
-        self._log("get_repo_as_rendered",name=name,token=token)
-        obj = self.api.find_repo(name=name)
-        if obj is not None:
-            return self.xmlrpc_hacks(utils.blender(self.api, True, obj))
-        return self.xmlrpc_hacks({})
-    
-    
-    def get_image_as_rendered(self,name,token=None,**rest):
-        """
-        Return the image as passed through cobbler's
-        inheritance/graph engine.  Shows what would be installed, not
-        the input data.
-        """
-        return self.get_image_for_koan(self,name)
-    
-    
-    def get_image_for_koan(self,name,token=None,**rest):
-        """
-        Same as get_image_as_rendered.
-        """
-        self._log("get_image_as_rendered",name=name,token=token)
-        obj = self.api.find_image(name=name)
-        if obj is not None:
-            return self.xmlrpc_hacks(utils.blender(self.api, True, obj))
-        return self.xmlrpc_hacks({})
-    
-    
-    def get_random_mac(self,virt_type="xenpv",token=None,**rest):
-        """
-        Wrapper for utils.get_random_mac
-        Used in the webui
-        """
-        self._log("get_random_mac",token=None)
-        return utils.get_random_mac(self.api,virt_type)
-    
-    
-    def xmlrpc_hacks(self,data):
-        """
-        Convert None in XMLRPC to just '~' to make extra sure a client
-        that can't allow_none can deal with this.  ALSO: a weird hack ensuring
-        that when dicts with integer keys (or other types) are transmitted
-        with string keys.
-        """
-        return utils.strip_none(data)
-    
-    
-    def get_status(self,mode="normal",token=None,**rest):
-        """
-        Returns the same information as `cobbler status`
-        While a read-only operation, this requires a token because it's potentially a fair amount of I/O
-        """
-        self.check_access(token,"sync")
-        return self.api.status(mode=mode)
-    
-    
-    def is_kickstart_in_use(self,ks,token=None,**rest):
-        self._log("is_kickstart_in_use",token=token)
-        for x in self.api.profiles():
-           if x.kickstart is not None and x.kickstart == ks:
-               return True
-        for x in self.api.systems():
-           if x.kickstart is not None and x.kickstart == ks:
-               return True
-        return False
-    
-    
-    def generate_kickstart(self,profile=None,system=None,REMOTE_ADDR=None,REMOTE_MAC=None,**rest):
-        self._log("generate_kickstart")
-        return self.api.generate_kickstart(profile,system)
-    
-    
-    def get_blended_data(self,profile=None,system=None):
-        if profile is not None and profile != "":
-            obj = self.api.find_profile(profile)
-            if obj is None:
-                raise CX("profile not found: %s" % profile)
-        elif system is not None and system != "":
-            obj = self.api.find_system(system)
-            if obj is None:
-                raise CX("system not found: %s" % system)
-        else:
-            raise CX("internal error, no system or profile specified")
-        return self.xmlrpc_hacks(utils.blender(self.api, True, obj))
-    
-    
-    def get_settings(self,token=None,**rest):
-        """
-        Return the contents of /etc/cobbler/settings, which is a hash.
-        """
-        self._log("get_settings",token=token)
-        results = self.api.settings().to_datastruct()
-        self._log("my settings are: %s" % results, debug=True)
-        return self.xmlrpc_hacks(results)
-    
-    
-    def upload_log_data(self, sys_name, file, size, offset, data, token=None,**rest):
-        
-        """
-        This is a logger function used by the "anamon" logging system to
-        upload all sorts of auxilliary data from Anaconda.
-        As it's a bit of a potential log-flooder, it's off by default
-        and needs to be enabled in /etc/cobbler/settings.
-        """
-        
-        self._log("upload_log_data (file: '%s', size: %s, offset: %s)" % (file, size, offset), token=token, name=sys_name)
-        
-        # Check if enabled in self.api.settings()
-        if not self.api.settings().anamon_enabled:
-            # feature disabled!
-            return False
-        
-        # Find matching system record
-        systems = self.api.systems()
-        obj = systems.find(name=sys_name)
-        if obj == None:
-            # system not found!
-            self._log("upload_log_data - system '%s' not found" % sys_name, token=token, name=sys_name)
-            return False
-        
-        return self.__upload_file(sys_name, file, size, offset, data)
-    
-    
-    def check(self, token):
-        """
-        Returns a list of all the messages/warnings that are things
-        that admin may want to correct about the configuration of 
-        the cobbler server.  This has nothing to do with "check_access"
-        which is an auth/authz function in the XMLRPC API.
-        """
-        self.check_access(token, "check")
-        return self.api.check(logger=self.logger)
     
     
     def get_events(self, for_user=""):
@@ -1137,6 +1121,128 @@ class CobblerXMLRPCInterface:
             raise CX("no event with that id")
     
     
+###############################################################################
+## Other Assorted Methods #####################################################
+    
+    
+    def run_install_triggers(self,mode,objtype,name,ip,token=None,**rest):
+        
+        """
+        This is a feature used to run the pre/post install triggers.
+        See CobblerTriggers on Wiki for details
+        """
+        
+        self._log("run_install_triggers",token=token)
+        
+        if mode != "pre" and mode != "post":
+            return False
+        if objtype != "system" and objtype !="profile":
+            return False
+        
+        # the trigger script is called with name,mac, and ip as arguments 1,2, and 3
+        # we do not do API lookups here because they are rather expensive at install
+        # time if reinstalling all of a cluster all at once.
+        # we can do that at "cobbler check" time.
+        
+        utils.run_triggers(self.api, None, "/var/lib/cobbler/triggers/install/%s/*" % mode, additional=[objtype,name,ip],logger=self.logger)
+        
+        
+        return True
+    
+    
+    def version(self,token=None,**rest):
+        """
+        Return the cobbler version for compatibility testing with remote applications.
+        See api.py for documentation.
+        """
+        self._log("version",token=token)
+        return self.api.version()
+    
+    
+    def extended_version(self,token=None,**rest):
+        """
+        Returns the full dictionary of version information.  See api.py for documentation.
+        """
+        self._log("version",token=token)
+        return self.api.version(extended=True)
+    
+    
+    def check(self, token):
+        """
+        Returns a list of all the messages/warnings that are things
+        that admin may want to correct about the configuration of 
+        the cobbler server.  This has nothing to do with "check_access"
+        which is an auth/authz function in the XMLRPC API.
+        """
+        self.check_access(token, "check")
+        return self.api.check(logger=self.logger)
+    
+    
+    def get_settings(self,token=None,**rest):
+        """
+        Return the contents of /etc/cobbler/settings, which is a hash.
+        """
+        self._log("get_settings",token=token)
+        results = self.api.settings().to_datastruct()
+        self._log("my settings are: %s" % results, debug=True)
+        return self.xmlrpc_hacks(results)
+    
+    
+    def get_random_mac(self,virt_type="xenpv",token=None,**rest):
+        """
+        Wrapper for utils.get_random_mac
+        Used in the webui
+        """
+        self._log("get_random_mac",token=None)
+        return utils.get_random_mac(self.api,virt_type)
+    
+    
+    def xmlrpc_hacks(self,data):
+        """
+        Convert None in XMLRPC to just '~' to make extra sure a client
+        that can't allow_none can deal with this.  ALSO: a weird hack ensuring
+        that when dicts with integer keys (or other types) are transmitted
+        with string keys.
+        """
+        return utils.strip_none(data)
+    
+    
+    def get_status(self,mode="normal",token=None,**rest):
+        """
+        Returns the same information as `cobbler status`
+        While a read-only operation, this requires a token because it's potentially a fair amount of I/O
+        """
+        self.check_access(token,"sync")
+        return self.api.status(mode=mode)
+    
+    
+    def upload_log_data(self, sys_name, file, size, offset, data, token=None,**rest):
+        
+        """
+        This is a logger function used by the "anamon" logging system to
+        upload all sorts of auxilliary data from Anaconda.
+        As it's a bit of a potential log-flooder, it's off by default
+        and needs to be enabled in /etc/cobbler/settings.
+        """
+        
+        self._log("upload_log_data (file: '%s', size: %s, offset: %s)" % (file, size, offset), token=token, name=sys_name)
+        
+        # Check if enabled in self.api.settings()
+        if not self.api.settings().anamon_enabled:
+            # feature disabled!
+            return False
+        
+        # Find matching system record
+        systems = self.api.systems()
+        obj = systems.find(name=sys_name)
+        if obj == None:
+            # system not found!
+            self._log("upload_log_data - system '%s' not found" % sys_name, token=token, name=sys_name)
+            return False
+        
+        return self.__upload_file(sys_name, file, size, offset, data)
+    
+    
     def last_modified_time(self, token=None):
         """
         Return the time of the last modification to any object.
@@ -1157,100 +1263,6 @@ class CobblerXMLRPCInterface:
         """
         Deprecated method.  Now does nothing.
         """
-        return True
-    
-    
-    def get_user_from_token(self,token):
-        """
-        Given a token returned from login, return the username
-        that logged in with it.
-        """
-        if not self.token_cache.has_key(token):
-            raise CX("invalid token: %s" % token)
-        else:
-            return self.token_cache[token][1]
-    
-    
-    def check_access_no_fail(self,token,resource,arg1=None,arg2=None):
-        """
-        This is called by the WUI to decide whether an element
-        is editable or not. It differs form check_access in that
-        it is supposed to /not/ log the access checks (TBA) and does
-        not raise exceptions.
-        """
-        
-        need_remap = False
-        for x in [ "distro", "profile", "system", "repo", "image" ]:
-           if arg1 is not None and resource.find(x) != -1:
-              need_remap = True
-              break
-        
-        if need_remap:
-           # we're called with an object name, but need an object
-           arg1 = self.__name_to_object(resource,arg1)
-        
-        try:
-           self.check_access(token,resource,arg1,arg2)
-           return True 
-        except:
-           utils.log_exc(self.logger)
-           return False 
-    
-    
-    def check_access(self,token,resource,arg1=None,arg2=None):
-        validated = self.__validate_token(token)
-        user = self.get_user_from_token(token)
-        if user == "<DIRECT>":
-            self._log("CLI Authorized", debug=True)
-            return True
-        rc = self.api.authorize(user,resource,arg1,arg2)
-        self._log("%s authorization result: %s" % (user,rc),debug=True)
-        if not rc:
-            raise CX("authorization failure for user %s" % user) 
-        return rc
-    
-    
-    def login(self,login_user,login_password):
-        """
-        Takes a username and password, validates it, and if successful
-        returns a random login token which must be used on subsequent
-        method calls.  The token will time out after a set interval if not
-        used.  Re-logging in permitted.
-        """
-       
-        # if shared secret access is requested, don't bother hitting the auth
-        # plugin
-        if login_user == "":
-            if login_password == self.shared_secret:
-                return self.__make_token("<DIRECT>")
-            else:
-                utils.die(self.logger, "login failed")
-        
-        # this should not log to disk OR make events as we're going to
-        # call it like crazy in CobblerWeb.  Just failed attempts.
-        if self.__validate_user(login_user,login_password):
-            token = self.__make_token(login_user)
-            return token
-        else:
-            utils.die(self.logger, "login failed (%s)" % login_user)
-    
-    
-    def logout(self,token):
-        """
-        Retires a token ahead of the timeout.
-        """
-        self._log("logout", token=token)
-        if self.token_cache.has_key(token):
-            del self.token_cache[token]
-            return True
-        return False    
-    
-    
-    def token_check(self,token):
-        """
-        This is a demo function that does not return anything useful.
-        """
-        self.__validate_token(token)
         return True
     
     
@@ -1352,25 +1364,6 @@ class CobblerXMLRPCInterface:
                 fileh.write(new_data)
                 fileh.close()
             return True
-    
-    
-    def power_system(self,object_id,power=None,token=None,logger=None):
-        """
-        Internal implementation used by background_power, do not call
-        directly if possible.  
-        Allows poweron/poweroff/reboot of a system specified by object_id.
-        """
-        obj = self.__get_object(object_id)
-        self.check_access(token, "power_system", obj)
-        if power=="on":
-            rc=self.api.power_on(obj, user=None, password=None, logger=logger)
-        elif power=="off":
-            rc=self.api.power_off(obj, user=None, password=None, logger=logger)
-        elif power=="reboot":
-            rc=self.api.reboot(obj, user=None, password=None, logger=logger)
-        else:
-            utils.die(self.logger, "invalid power mode '%s', expected on/off/reboot" % power)
-        return rc
     
     
     def clear_system_logs(self, object_id, token=None, logger=None):
@@ -1747,29 +1740,6 @@ class CobblerXMLRPCInterface:
         Would be very nice to allow for PAM and/or just Kerberos.
         """
         return self.api.authenticate(input_user,input_password)
-    
-    
-    def __validate_token(self,token): 
-        """
-        Checks to see if an API method can be called when
-        the given token is passed in.  Updates the timestamp
-        of the token automatically to prevent the need to
-        repeatedly call login().  Any method that needs
-        access control should call this before doing anything
-        else.
-        """
-        self.__invalidate_expired_tokens()
-        
-        if self.token_cache.has_key(token):
-            user = self.get_user_from_token(token)
-            if user == "<system>":
-               # system token is only valid over Unix socket
-               return False
-            self.token_cache[token] = (time.time(), user) # update to prevent timeout
-            return True
-        else:
-            self._log("invalid token",token=token)
-            raise CX("invalid token: %s" % token)
     
     
     def __name_to_object(self,resource,name):

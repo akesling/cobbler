@@ -970,7 +970,7 @@ class Koan:
             if what[-1] == "s":
                 data = getattr(self.xmlrpc_server, "get_%s" % what)()
             else:
-                data = getattr(self.xmlrpc_server, "get_%s_for_koan" % what)(name)
+                data = getattr(self.xmlrpc_server, "get_%s_as_rendered" % what)(name)
         except:
             traceback.print_exc()
             self.connect_fail()
