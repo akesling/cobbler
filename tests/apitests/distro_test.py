@@ -28,10 +28,10 @@ class DistroTests(CobblerTest):
         
     def test_new_working_distro(self):
         """
-        Attempt to create a Cobbler distro and tests its existence using find_distro
+        Attempt to create a Cobbler distro and tests its existence using find_distros
         """
         did, distro_name = self.create_distro()
-        self.assertTrue(self.api.find_distro({'name': distro_name}) != None)
+        self.assertTrue(self.api.find_distros({'name': distro_name}) != None)
         return did, distro_name
 
     def test_new_nonworking_distro(self):
@@ -50,7 +50,7 @@ class DistroTests(CobblerTest):
         """
         did, distro_name = self.test_new_working_distro()
         self.remove_distro(distro_name)
-        self.assertTrue(self.api.find_distro({'name': distro_name}) == [])
+        self.assertTrue(self.api.find_distros({'name': distro_name}) == [])
     
     def test_copy_distro(self):
         """
@@ -58,7 +58,7 @@ class DistroTests(CobblerTest):
         """
         did, distro_name = self.test_new_working_distro()
         result, new_name = self.copy_distro(did)
-        self.assertTrue(self.api.find_distro({'name': new_name}) != None)
+        self.assertTrue(self.api.find_distros({'name': new_name}) != None)
         
         return (did, distro_name), (new_name)
     
@@ -68,7 +68,7 @@ class DistroTests(CobblerTest):
         """
         did, distro_name = self.test_new_working_distro()
         result, new_name = self.rename_distro(did)
-        self.assertTrue(self.api.find_distro({'name': new_name}) != None)
+        self.assertTrue(self.api.find_distros({'name': new_name}) != None)
         
         return (did, distro_name), (new_name)
     

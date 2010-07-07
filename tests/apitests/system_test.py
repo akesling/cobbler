@@ -30,7 +30,7 @@ class SystemTests(CobblerTest):
     def test_new_working_system(self):
         """ Test creation of a cobbler system. """
         (system_id, system_name) = self.create_system(self.profile_name)
-        systems = self.api.find_system({'name': system_name})
+        systems = self.api.find_systems({'name': system_name})
         self.assertTrue(len(systems) > 0)
         return system_id, system_name
     
@@ -48,7 +48,7 @@ class SystemTests(CobblerTest):
         """
         system_id, system_name = self.test_new_working_system()
         self.api.remove_system(system_name, self.token)
-        self.assertTrue(self.api.find_system({'name': system_name}) == [])
+        self.assertTrue(self.api.find_systems({'name': system_name}) == [])
     
     def test_copy_system(self):
         """
@@ -56,7 +56,7 @@ class SystemTests(CobblerTest):
         """
         system_id, system_name = self.test_new_working_system()
         result, new_name = self.copy_system(system_id)
-        self.assertTrue(self.api.find_system({'name': new_name}) != [])
+        self.assertTrue(self.api.find_systems({'name': new_name}) != [])
 
         return (system_id, system_name), (new_name)
     
@@ -66,7 +66,7 @@ class SystemTests(CobblerTest):
         """
         system_id, system_name = self.test_new_working_system()
         result, new_name = self.rename_system(system_id)
-        self.assertTrue(self.api.find_system({'name': new_name}) != [])
+        self.assertTrue(self.api.find_systems({'name': new_name}) != [])
 
         return (system_id, system_name), (new_name)
     
@@ -84,7 +84,7 @@ class SystemTests(CobblerTest):
     #    (system_id, system_name) = self.create_system(self.profile_name)
     #    self.api.modify_system(system_id, 'netboot_enabled', True, self.token)
     #    self.api.save_system(system_id, self.token)
-    #    #systems = self.api.find_system({'name': system_name})
+    #    #systems = self.api.find_systems({'name': system_name})
 
     #    url = "http://%s/cblr/svc/op/nopxe/system/%s" % \
     #            (cfg['cobbler_server'], system_name)

@@ -33,7 +33,7 @@ class ProfileTests(CobblerTest):
         """
         distro_name = self.create_distro()[1]
         pid, profile_name = self.create_profile(distro_name)
-        self.assertTrue(self.api.find_profile({'name': profile_name}) != [])
+        self.assertTrue(self.api.find_profiles({'name': profile_name}) != [])
         return pid, profile_name
         
     def test_new_nonworking_profile(self):
@@ -50,7 +50,7 @@ class ProfileTests(CobblerTest):
         """
         pid, profile_name = self.test_new_working_profile()
         self.api.remove_profile(profile_name, self.token)
-        self.assertTrue(self.api.find_profile({'name': profile_name}) == [])
+        self.assertTrue(self.api.find_profiles({'name': profile_name}) == [])
     
     def test_copy_profile(self):
         """
@@ -58,7 +58,7 @@ class ProfileTests(CobblerTest):
         """
         pid, profile_name = self.test_new_working_profile()
         result, new_name = self.copy_profile(pid)
-        self.assertTrue(self.api.find_profile({'name': new_name}) != [])
+        self.assertTrue(self.api.find_profiles({'name': new_name}) != [])
         
         return (pid, profile_name), (new_name)
     
@@ -68,7 +68,7 @@ class ProfileTests(CobblerTest):
         """
         pid, profile_name = self.test_new_working_profile()
         result, new_name = self.rename_profile(pid)
-        self.assertTrue(self.api.find_profile({'name': new_name}) != [])
+        self.assertTrue(self.api.find_profiles({'name': new_name}) != [])
         
         return (pid, profile_name), (new_name)
     
