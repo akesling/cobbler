@@ -1,8 +1,15 @@
-Cobbler, Koan, and Cobbler-Web are written & maintained by:
+Original Author of Cobbler, Koan, and Cobbler-Web:
 
     Michael DeHaan <mdehaan@redhat.com>
 
-Patches and other contributions from:
+Cobbler, Koan, And Cobbler-Web Are Currently Maintained By:
+
+    John Eckersberg <jeckersb@redhat.com>
+    Scott Henson <shenson@redhat.com>
+    Devan Goodwin <dgoodwin@rm-rf.ca>
+    Alex Wood <awood@redhat.com>
+
+And Our List Of Illustrious Contributors:
 
     Partha Aji <paji@redhat.com>
     Anton Arapov <aarapov@redhat.com>
@@ -43,6 +50,7 @@ Patches and other contributions from:
     Brian Kearney <bkearney@redhat.com>
     Henry Kemp <henrykemp@gmail.com>
     Ruben Kerkhof <ruben@rubenkerkhof.com>
+    Alex Kesling <ahkeslin@ncsu.edu>
     Don Khan <khan_don@emc.com>
     Dominic LoBue <git.20.dlobue@neverbox.com>
     Gavin Romig-Koch <gavin@redhat.com>

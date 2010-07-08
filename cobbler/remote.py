@@ -146,18 +146,20 @@ class CobblerXMLRPCInterface:
         ]
         
         interface = interface or {
-            # Method            : ( object types to operate on, (args, kwargs) )
-            'copy_item'         : ( default_objs, ((), {}) ),
-            'find_items'        : ( default_objs, ((), {}) ),
-            'get_item'          : ( default_objs, ((), {}) ),
-            'get_items'         : ( default_objs, ((), {}) ),
-            'get_item_handle'   : ( default_objs, ((), {}) ),
-            'modify_item'       : ( default_objs, ((), {}) ),
-            'new_item'          : ( default_objs[:] + [('subprofile', ((), {'is_subobject': True}))],
-                                  ((), {}) ),
-            'remove_item'       : ( default_objs, ((), {}) ),
-            'rename_item'       : ( default_objs, ((), {}) ),
-            'save_item'         : ( default_objs, ((), {}) ),
+            # Method                : ( object types to operate on, (args, kwargs) )
+            'copy_item'             : ( default_objs, ((), {}) ),
+            'find_items'            : ( default_objs, ((), {}) ),
+            'find_items_paged'      : ( default_objs, ((), {}) ),
+            'get_item'              : ( default_objs, ((), {}) ),
+            'get_items'             : ( default_objs, ((), {}) ),
+            'get_items_since'       : ( default_objs, ((), {}) ),
+            'get_item_as_rendered'  : ( default_objs, ((), {}) ),
+            'get_item_handle'       : ( default_objs, ((), {}) ),
+            'modify_item'           : ( default_objs, ((), {}) ),
+            'new_item'              : ( default_objs[:] + [('subprofile', ((), {'is_subobject': True}))], ((), {}) ),
+            'remove_item'           : ( default_objs, ((), {}) ),
+            'rename_item'           : ( default_objs, ((), {}) ),
+            'save_item'             : ( default_objs, ((), {}) ),
         }
         
         for meth, chunk in interface.items():
@@ -210,6 +212,24 @@ class CobblerXMLRPCInterface:
         return self.xmlrpc_hacks(items)
     
     
+    def find_items_paged(self, what, criteria=None, sort_field=None, page=None, items_per_page=None, token=None):
+        """
+        Returns a list of hashes as with find_items but additionally supports
+        returning just a portion of the total list, for instance in supporting
+        a web app that wants to show a limited amount of items per page.
+        """
+        # FIXME: make token required for all logging calls
+        self._log("find_items_paged(%s); criteria(%s); sort(%s)" % (what,criteria,sort_field), token=token)
+        items = self.api.find_items(what,criteria=criteria)
+        items = self.__sort(items,sort_field)
+        (items,pageinfo) = self.__paginate(items,page,items_per_page)
+        items = [x.to_datastruct() for x in items]
+        return self.xmlrpc_hacks({
+            'items'    : items,
+            'pageinfo' : pageinfo
+        })
+    
+    
     def get_item(self, what, name, flatten=False):
         """
         Returns a hash describing a given object.
@@ -217,8 +237,8 @@ class CobblerXMLRPCInterface:
         name -- the object name to retrieve
         flatten -- reduce hashes to string representations (True/False)
         """
-        self._log("get_item(%s,%s)"%(what,name))
-        item=self.api.get_item(what,name)
+        self._log("get_item(%s,%s)" % (what, name))
+        item = self.api.get_item(what, name)
         if item is not None:
             item=item.to_datastruct()
         if flatten:
@@ -235,6 +255,28 @@ class CobblerXMLRPCInterface:
         # FIXME: is the xmlrpc_hacks method still required ?
         item = [x.to_datastruct() for x in self.api.get_items(what)]
         return self.xmlrpc_hacks(item)
+    
+    
+    def get_items_since(self, what, mtime):
+        """
+        Return all of the objects of the provide typed that have been 
+        modified after mtime.
+        """
+        meth = "get_%s_since" % what
+        data = getattr(self.api, meth)(mtime, collapse=True)
+        return self.xmlrpc_hacks(data)
+    
+    
+    def get_item_as_rendered(self, what, name, token=None, **kwargs):
+        """
+        Return the given item as passed through cobbler's
+        inheritance/graph engine.  Shows what would be installed, not
+        the input data.
+        """
+        obj = self.api.get_item(what, name) self._log("get_item_as_rendered",name=name,token=token)
+        if obj is not None:
+            return self.xmlrpc_hacks(utils.blender(self.api, True, obj))
+        return self.xmlrpc_hacks({})
     
     
     def get_item_handle(self,what,name,token=None):
@@ -336,24 +378,6 @@ class CobblerXMLRPCInterface:
         This is just like get_items, but transmits less data.
         """
         return [x.name for x in self.api.get_items(what)]
-    
-    
-    def find_items_paged(self, what, criteria=None, sort_field=None, page=None, items_per_page=None, token=None):
-        """
-        Returns a list of hashes as with find_items but additionally supports
-        returning just a portion of the total list, for instance in supporting
-        a web app that wants to show a limited amount of items per page.
-        """
-        # FIXME: make token required for all logging calls
-        self._log("find_items_paged(%s); criteria(%s); sort(%s)" % (what,criteria,sort_field), token=token)
-        items = self.api.find_items(what,criteria=criteria)
-        items = self.__sort(items,sort_field)
-        (items,pageinfo) = self.__paginate(items,page,items_per_page)
-        items = [x.to_datastruct() for x in items]
-        return self.xmlrpc_hacks({
-            'items'    : items,
-            'pageinfo' : pageinfo
-        })
     
     
     def has_item(self,what,name,token=None):
@@ -595,47 +619,6 @@ class CobblerXMLRPCInterface:
         return True
     
     
-    def get_distros_since(self,mtime):
-        """
-        Return all of the distro objects that have been modified
-        after mtime.
-        """
-        data = self.api.get_distros_since(mtime, collapse=True)
-        return self.xmlrpc_hacks(data)
-
-    
-    def get_profiles_since(self,mtime):
-        """
-        See documentation for get_distros_since
-        """
-        data = self.api.get_profiles_since(mtime, collapse=True)
-        return self.xmlrpc_hacks(data)
-    
-    
-    def get_systems_since(self,mtime):
-        """
-        See documentation for get_distros_since
-        """
-        data = self.api.get_systems_since(mtime, collapse=True)
-        return self.xmlrpc_hacks(data)
-    
-    
-    def get_repos_since(self,mtime):
-        """
-        See documentation for get_distros_since
-        """
-        data = self.api.get_repos_since(mtime, collapse=True)
-        return self.xmlrpc_hacks(data)
-    
-    
-    def get_images_since(self,mtime):
-        """
-        See documentation for get_distros_since
-        """
-        data = self.api.get_images_since(mtime, collapse=True)
-        return self.xmlrpc_hacks(data)
-    
-    
     def get_repos_compatible_with_profile(self,profile=None,token=None,**rest):
         """
         Get repos that can be used with a given profile name
@@ -674,7 +657,7 @@ class CobblerXMLRPCInterface:
               
     
     # this is used by the puppet external nodes feature
-    def find_system_by_dns_name(self,dns_name):
+    def find_system_by_dns_name(self, dns_name):
         # FIXME: implement using api.py's find API
         # and expose generic finds for other methods
         # WARNING: this function is /not/ expected to stay in cobbler long term
@@ -685,89 +668,6 @@ class CobblerXMLRPCInterface:
                   name = x["name"]
                   return self.get_system_for_koan(name)
         return {}
-    
-    
-    def get_distro_as_rendered(self,name,token=None,**rest):
-        """
-        Return the distribution as passed through cobbler's
-        inheritance/graph engine.  Shows what would be installed, not
-        the input data.
-        """
-        self._log("get_distro_as_rendered",name=name,token=token)
-        obj = self.api.find_distro(name=name)
-        if obj is not None:
-            return self.xmlrpc_hacks(utils.blender(self.api, True, obj))
-        return self.xmlrpc_hacks({})
-    
-    
-    def get_profile_as_rendered(self,name,token=None,**rest):
-        """
-        Return the profile as passed through cobbler's
-        inheritance/graph engine.  Shows what would be installed, not
-        the input data.
-        """
-        self._log("get_profile_as_rendered", name=name, token=token)
-        obj = self.api.find_profile(name=name)
-        if obj is not None:
-            return self.xmlrpc_hacks(utils.blender(self.api, True, obj))
-        return self.xmlrpc_hacks({})
-    
-    
-    def get_system_as_rendered(self,name,token=None,**rest):
-        """
-        Return the system as passed through cobbler's
-        inheritance/graph engine.  Shows what would be installed, not
-        the input data.
-        """
-        self._log("get_system_as_rendered",name=name,token=token)
-        obj = self.api.find_system(name=name)
-        if obj is not None:
-            hash = utils.blender(self.api,True,obj)
-            # Generate a pxelinux.cfg?
-            image_based = False
-            profile = obj.get_conceptual_parent()
-            distro  = profile.get_conceptual_parent()
-            arch = distro.arch
-            if distro is None and profile.COLLECTION_TYPE == "profile":
-                image_based = True
-                arch = profile.arch
-
-            if obj.is_management_supported():
-                if not image_based:
-                    hash["pxelinux.cfg"] = self.pxegen.write_pxe_file(
-                        None, obj, profile, distro, arch)
-                else:
-                    hash["pxelinux.cfg"] = self.pxegen.write_pxe_file(
-                        None, obj,None,None,arch,image=profile)
-
-            return self.xmlrpc_hacks(hash)
-        return self.xmlrpc_hacks({})
-    
-    
-    def get_repo_as_rendered(self,name,token=None,**rest):
-        """
-        Return the repo as passed through cobbler's
-        inheritance/graph engine.  Shows what would be installed, not
-        the input data.
-        """
-        self._log("get_repo_as_rendered",name=name,token=token)
-        obj = self.api.find_repo(name=name)
-        if obj is not None:
-            return self.xmlrpc_hacks(utils.blender(self.api, True, obj))
-        return self.xmlrpc_hacks({})
-    
-    
-    def get_image_as_rendered(self,name,token=None,**rest):
-        """
-        Return the image as passed through cobbler's
-        inheritance/graph engine.  Shows what would be installed, not
-        the input data.
-        """
-        self._log("get_image_as_rendered",name=name,token=token)
-        obj = self.api.find_image(name=name)
-        if obj is not None:
-            return self.xmlrpc_hacks(utils.blender(self.api, True, obj))
-        return self.xmlrpc_hacks({})
     
     
     def is_kickstart_in_use(self,ks,token=None,**rest):
@@ -800,6 +700,28 @@ class CobblerXMLRPCInterface:
         return self.xmlrpc_hacks(utils.blender(self.api, True, obj))
     
     
+    def __get_object(self, object_id):
+        """
+        Helper function. Given an object id, return the actual object.
+        """
+        if object_id.startswith("___NEW___"):
+           return self.object_cache[object_id][1]
+        (otype, oname) = object_id.split("::",1)
+        return self.api.get_item(otype,oname)
+    
+    
+    def __name_to_object(self,resource,name):
+        if resource.find("distro") != -1:
+            return self.api.find_distro(name)
+        if resource.find("profile") != -1:
+            return self.api.find_profile(name)
+        if resource.find("system") != -1:
+            return self.api.find_system(name)
+        if resource.find("repo") != -1:
+            return self.api.find_repo(name)
+        return None
+ 
+
 ###############################################################################
 ## Authentication/Authorization Methods #######################################
     
@@ -919,6 +841,52 @@ class CobblerXMLRPCInterface:
         except:
            utils.log_exc(self.logger)
            return False 
+    
+    
+    def __make_token(self,user):
+        """
+        Returns a new random token.
+        """
+        b64 = self.__get_random(25)
+        self.token_cache[b64] = (time.time(), user)
+        return b64
+    
+    
+    def __invalidate_expired_tokens(self):
+        """
+        Deletes any login tokens that might have expired.
+        Also removes expired events
+        """
+        timenow = time.time()
+        for token in self.token_cache.keys():
+            (tokentime, user) = self.token_cache[token]
+            if (timenow > tokentime + TOKEN_TIMEOUT):
+                self._log("expiring token",token=token,debug=True)
+                del self.token_cache[token]
+        # and also expired objects
+        for oid in self.object_cache.keys():
+            (tokentime, entry) = self.object_cache[oid]
+            if (timenow > tokentime + CACHE_TIMEOUT):
+                del self.object_cache[oid]
+        for tid in self.events.keys():
+            (eventtime, name, status, who) = self.events[tid]
+            if (timenow > eventtime + EVENT_TIMEOUT):
+                del self.events[tid]
+            # logfile cleanup should be dealt w/ by logrotate
+    
+    
+    def __validate_user(self,input_user,input_password):
+        """
+        Returns whether this user/pass combo should be given
+        access to the cobbler read-write API.
+        
+        For the system user, this answer is always "yes", but
+        it is only valid for the socket interface.
+        
+        FIXME: currently looks for users in /etc/cobbler/auth.conf
+        Would be very nice to allow for PAM and/or just Kerberos.
+        """
+        return self.api.authenticate(input_user,input_password)
     
     
 ###############################################################################
@@ -1121,6 +1089,57 @@ class CobblerXMLRPCInterface:
             raise CX("no event with that id")
     
     
+    def __generate_event_id(self,optype):
+        t = time.time()
+        (year, month, day, hour, minute, second, weekday, julian, dst) = time.localtime()
+        return "%04d-%02d-%02d_%02d%02d%02d_%s" % (year,month,day,hour,minute,second,optype)
+    
+    
+    def _new_event(self, name):
+        event_id = self.__generate_event_id("event")
+        event_id = str(event_id)
+        self.events[event_id] = [ float(time.time()), str(name), EVENT_INFO, [] ]
+    
+    
+    def __start_task(self, thr_obj_fn, token, role_name, name, args, on_done=None):
+        """
+        Starts a new background task.
+            token      -- token from login() call, all tasks require tokens
+            role_name  -- used to check token against authn/authz layers
+            thr_obj_fn -- function handle to run in a background thread
+            name       -- display name to show in logs/events
+            args       -- usually this is a single hash, containing options
+            on_done    -- an optional second function handle to run after success (and only success)
+        Returns a task id.
+        """
+        self.check_access(token, role_name)
+        event_id = self.__generate_event_id(role_name) # use short form for logfile suffix
+        event_id = str(event_id)
+        self.events[event_id] = [ float(time.time()), str(name), EVENT_RUNNING, [] ]
+        
+        self._log("start_task(%s); event_id(%s)"%(name,event_id))
+        logatron = clogger.Logger("/var/log/cobbler/tasks/%s.log" % event_id)
+         
+        thr_obj = CobblerThread(event_id,self,logatron,args)
+        thr_obj._run = thr_obj_fn
+        if on_done is not None:
+           thr_obj.on_done = on_done
+        thr_obj.start()
+        return event_id
+    
+    
+    def _set_task_state(self,thread_obj,event_id,new_state):
+        event_id = str(event_id)
+        if self.events.has_key(event_id):
+            self.events[event_id][2] = new_state
+            self.events[event_id][3] = [] # clear the list of who has read it
+        if thread_obj is not None:
+            if new_state == EVENT_COMPLETE: 
+                thread_obj.logger.info("### TASK COMPLETE ###")
+            if new_state == EVENT_FAILED: 
+                thread_obj.logger.error("### TASK FAILED ###")
+    
+    
 ###############################################################################
 ## Other Assorted Methods #####################################################
     
@@ -1278,6 +1297,25 @@ class CobblerXMLRPCInterface:
         return self.api.sync()
     
     
+    def get_kickstart_templates(self,token=None,**rest):
+        """
+        Returns all of the kickstarts that are in use by the system.
+        """
+        self._log("get_kickstart_templates",token=token)
+        #self.check_access(token, "get_kickstart_templates")
+        return utils.get_kickstart_templates(self.api)
+    
+    
+    def get_snippets(self,token=None,**rest):
+        """
+        Returns all the kickstart snippets.
+        """
+        self._log("get_snippets",token=token)
+    
+        # FIXME: settings.snippetsdir should be used here
+        return self.__get_sub_snippets("/var/lib/cobbler/snippets")
+    
+    
     def read_or_write_kickstart_template(self,kickstart_file,is_read,new_data,token):
         """
         Allows the web app to be used as a kickstart file editor.  For security
@@ -1376,59 +1414,20 @@ class CobblerXMLRPCInterface:
         return rc
     
     
+    def __get_sub_snippets(self, path):
+        results = []
+        files = glob.glob(os.path.join(path,"*"))
+        for f in files:
+           if os.path.isdir(f) and not os.path.islink(f):
+              results += self.__get_sub_snippets(f)
+           elif not os.path.islink(f):
+              results.append(f)
+        results.sort()
+        return results
+    
+    
 ###############################################################################
-## Helper Methods #############################################################
-    
-    
-    def __generate_event_id(self,optype):
-        t = time.time()
-        (year, month, day, hour, minute, second, weekday, julian, dst) = time.localtime()
-        return "%04d-%02d-%02d_%02d%02d%02d_%s" % (year,month,day,hour,minute,second,optype)
-    
-    
-    def _new_event(self, name):
-        event_id = self.__generate_event_id("event")
-        event_id = str(event_id)
-        self.events[event_id] = [ float(time.time()), str(name), EVENT_INFO, [] ]
-    
-    
-    def __start_task(self, thr_obj_fn, token, role_name, name, args, on_done=None):
-        """
-        Starts a new background task.
-            token      -- token from login() call, all tasks require tokens
-            role_name  -- used to check token against authn/authz layers
-            thr_obj_fn -- function handle to run in a background thread
-            name       -- display name to show in logs/events
-            args       -- usually this is a single hash, containing options
-            on_done    -- an optional second function handle to run after success (and only success)
-        Returns a task id.
-        """
-        self.check_access(token, role_name)
-        event_id = self.__generate_event_id(role_name) # use short form for logfile suffix
-        event_id = str(event_id)
-        self.events[event_id] = [ float(time.time()), str(name), EVENT_RUNNING, [] ]
-        
-        self._log("start_task(%s); event_id(%s)"%(name,event_id))
-        logatron = clogger.Logger("/var/log/cobbler/tasks/%s.log" % event_id)
-         
-        thr_obj = CobblerThread(event_id,self,logatron,args)
-        thr_obj._run = thr_obj_fn
-        if on_done is not None:
-           thr_obj.on_done = on_done
-        thr_obj.start()
-        return event_id
-    
-    
-    def _set_task_state(self,thread_obj,event_id,new_state):
-        event_id = str(event_id)
-        if self.events.has_key(event_id):
-            self.events[event_id][2] = new_state
-            self.events[event_id][3] = [] # clear the list of who has read it
-        if thread_obj is not None:
-            if new_state == EVENT_COMPLETE: 
-                thread_obj.logger.info("### TASK COMPLETE ###")
-            if new_state == EVENT_FAILED: 
-                thread_obj.logger.error("### TASK FAILED ###")
+## Other Helper Methods #######################################################
     
     
     def __sorter(self,a,b):
@@ -1556,53 +1555,12 @@ class CobblerXMLRPCInterface:
         })
     
     
-    def __get_object(self, object_id):
-        """
-        Helper function. Given an object id, return the actual object.
-        """
-        if object_id.startswith("___NEW___"):
-           return self.object_cache[object_id][1]
-        (otype, oname) = object_id.split("::",1)
-        return self.api.get_item(otype,oname)
-    
-    
     def __is_interface_field(self,f):
         k = "*%s" % f
         for x in item_system.FIELDS:
            if k == x[0]:
               return True
         return False
-    
-    
-    def get_kickstart_templates(self,token=None,**rest):
-        """
-        Returns all of the kickstarts that are in use by the system.
-        """
-        self._log("get_kickstart_templates",token=token)
-        #self.check_access(token, "get_kickstart_templates")
-        return utils.get_kickstart_templates(self.api)
-    
-    
-    def get_snippets(self,token=None,**rest):
-        """
-        Returns all the kickstart snippets.
-        """
-        self._log("get_snippets",token=token)
-    
-        # FIXME: settings.snippetsdir should be used here
-        return self.__get_sub_snippets("/var/lib/cobbler/snippets")
-    
-    
-    def __get_sub_snippets(self, path):
-        results = []
-        files = glob.glob(os.path.join(path,"*"))
-        for f in files:
-           if os.path.isdir(f) and not os.path.islink(f):
-              results += self.__get_sub_snippets(f)
-           elif not os.path.islink(f):
-              results.append(f)
-        results.sort()
-        return results
     
     
     def __upload_file(self, sys_name, file, size, offset, data):
@@ -1696,64 +1654,6 @@ class CobblerXMLRPCInterface:
         return b64 
     
     
-    def __make_token(self,user):
-        """
-        Returns a new random token.
-        """
-        b64 = self.__get_random(25)
-        self.token_cache[b64] = (time.time(), user)
-        return b64
-    
-    
-    def __invalidate_expired_tokens(self):
-        """
-        Deletes any login tokens that might have expired.
-        Also removes expired events
-        """
-        timenow = time.time()
-        for token in self.token_cache.keys():
-            (tokentime, user) = self.token_cache[token]
-            if (timenow > tokentime + TOKEN_TIMEOUT):
-                self._log("expiring token",token=token,debug=True)
-                del self.token_cache[token]
-        # and also expired objects
-        for oid in self.object_cache.keys():
-            (tokentime, entry) = self.object_cache[oid]
-            if (timenow > tokentime + CACHE_TIMEOUT):
-                del self.object_cache[oid]
-        for tid in self.events.keys():
-            (eventtime, name, status, who) = self.events[tid]
-            if (timenow > eventtime + EVENT_TIMEOUT):
-                del self.events[tid]
-            # logfile cleanup should be dealt w/ by logrotate
-    
-    
-    def __validate_user(self,input_user,input_password):
-        """
-        Returns whether this user/pass combo should be given
-        access to the cobbler read-write API.
-        
-        For the system user, this answer is always "yes", but
-        it is only valid for the socket interface.
-        
-        FIXME: currently looks for users in /etc/cobbler/auth.conf
-        Would be very nice to allow for PAM and/or just Kerberos.
-        """
-        return self.api.authenticate(input_user,input_password)
-    
-    
-    def __name_to_object(self,resource,name):
-        if resource.find("distro") != -1:
-            return self.api.find_distro(name)
-        if resource.find("profile") != -1:
-            return self.api.find_profile(name)
-        if resource.find("system") != -1:
-            return self.api.find_system(name)
-        if resource.find("repo") != -1:
-            return self.api.find_repo(name)
-        return None
- 
-
 # *********************************************************************************
 # *********************************************************************************
 
