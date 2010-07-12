@@ -29,19 +29,19 @@ class BaseField(object):
     """
     __metaclass__ = MetaField
     
+    _coerce = lambda x:x
     default = None
+    tags = []
     
-    def __init__(self):
-        self._value = default
-    
-    def __get__(self, instance, owner):
-        if instance is None:
-            return self
-        else:
-            return self._value
+    def __init__(self, default=None, tooltip=None, display_name=None, tags=None,
+                 visible=True):
+        self.default = default or type(self).default
+        self.tags = list(tags or type(self).tags)
+        self.visible = bool(visible)
+        self._value = self.default
     
     def __set__(self, instance, value):
-        self._value = value
+        self.set(value)
     
     def __delete__(self, instance):
         self._fields.remove(self._name)
@@ -52,6 +52,15 @@ class BaseField(object):
     
     def __str__(self):
         return self.__unicode__()
+    
+    def get(self):
+        return self._value
+    
+    def set(self):
+        if type(self) is not BaseField:
+            super(type(self), self).__set__(instance, self._coerce(value))
+        else:
+            self._value = value
     
     def validate(self):
         """The most basic Field validation method
@@ -66,7 +75,7 @@ class BaseField(object):
                 appropriate Exception which subclasses the 
                 CobblerValidationException.
         """
-        if default is not None:
+        if self.default is not None and type(self.default) is self._type:
             return True
         else:
             raise InvalidDefault(
@@ -112,6 +121,9 @@ class MetaItem(type):
                     )
                 # It's always nice to know what you're called
                 val._name = name
+                if not hasattr(val, 'display_name'): 
+                    val.display_name = " ".join(
+                            map(str.capitalize, val._name.split("_")))
                 attrs['_fields'].append(name)
         
         return super(MetaItem, cls).__new__(cls, name, bases, attrs)
@@ -138,30 +150,56 @@ class BaseItem(object):
 ### Default Fields ###########################################################
 
 
-class StrField(BaseField):
-    default = ""
-    
-    def __set__(self, instance, value):
-        super(StrField, self).__set__(instance, unicode(value))
+class DictField(BaseField):
+    default = {}
+    _coerce = dict
+    _type = dict
+
+
+class FloatField(BaseField):
+    default = 0.0
+    _coerce = float
+    _type = float
+
+
+class IntField(BaseField):
+    default = 0
+    _coerce = int
+    _type = int
 
 
 class ListField(BaseField):
     default = []
-    
-    def __set__(self, instance, value):
-        super(ListField, self).__set__(instance, list(value))
+    _coerce = list
+    _type = list
 
 
-class DictField(BaseField):
-    default = {}
-    
-    def __set__(self, instance, value):
-        super(DictField, self).__set__(instance, dict(value))
+class StrField(BaseField):
+    default = ""
+    _coerce = unicode
+    _type = unicode
 
 
 #class StrawberryField(BaseField):
 #   def forever(self):
 #       return self.forever()
+
+
+##############################################################################
+### Extended Fields ##########################################################
+
+
+class ChoiceField(StrField):
+    def __init__(self, choices, **kwargs):
+        self.choices = list(choices)
+        super(ChoiceField, self).__init__(**kwargs)
+    
+    def validate(self):
+        if self._value not in self.choices:
+            raise InvalidChoice(
+            u"Field of type %s contains a value not in its list of choices." %
+            self.__class__.__name__)
+        super(ChoiceField, self).validate()
 
 
 ##############################################################################
@@ -174,6 +212,7 @@ class DictField(BaseField):
 
 
 class Distro(BaseItem):
+    name = StrField()
     owners = ListField()
 
 
@@ -204,4 +243,8 @@ class CobblerValidationException(Exception):
 
 
 class InvalidDefault(CobblerValidationException):
+    pass
+
+
+class InvalidChoice(CobblerValidationException):
     pass
