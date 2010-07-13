@@ -6,10 +6,9 @@ as Django's Model and Form APIs.
 
 __docformat__ = 'restructuredtext en'
 
-import simplejson as json
-
 import logging
-_log = logging.getLogger('objects')
+LOG_PREFIX = 'store.objects'
+_log = logging.getLogger(LOG_PREFIX)
 
 # A list which records all item types created
 _item_types = []
@@ -115,14 +114,14 @@ class MetaItem(type):
     # useful to have the creation of Item types be logged in case 
     # some configuration is malformed and needs to be debugged.
     
-    _log = logging.getLogger('objects.MetaItem')
+    _log = logging.getLogger(LOG_PREFIX+'.MetaItem')
     def __new__(cls, cls_name, bases, attrs):
         if _log.getEffectiveLevel() <= logging.DEBUG:
             _log.DEBUG(u"Creating Item Type (%s)" % cls_name)
         
         # Build a nice happy logger for each Item type.
         if '_log' not in attrs:
-            attrs['_log'] = logging.getLogger("objects.Item.%s" % cls_name)
+            attrs['_log'] = logging.getLogger(LOG_PREFIX+'.Item.%s' % cls_name)
         
         # Manipulate Field attributes on subclassed Items as needed
         # The Item class itself shouldn't have any Fields
@@ -142,11 +141,32 @@ class MetaItem(type):
                             map(str.capitalize, val._name.split("_")))
                 attrs['_fields'].append(name)
         
+        # Bind the object's name to it's requirements so that we
+        # can return clearer errors.
+        for req in attrs['_requirements']:
+            if not req._item:
+                req._item = item
+        
         # Record the type of new items so we can ask for these later
         if cls_name is not 'BaseItem':
             _item_types.append(cls_name)
         
         return super(MetaItem, cls).__new__(cls, name, bases, attrs)
+
+
+class ItemIterator(object):
+    #Because having __dict__ is absolutely unnecessary
+    __slots__ = ['item', 'count']
+    
+    def __init__(self, item):
+        self.item = item
+        self.count = 0
+    
+    def next():
+        name = self.item._fields[self.count]
+        field = getattr(self.item, name)
+        self.count += 1
+        return name, field
 
 
 class BaseItem(object):
@@ -164,11 +184,14 @@ class BaseItem(object):
         self._load_handler = load_handler
         self._store_handler = store_handler
     
+    def __iter__(self):
+        return ItemIterator(self)
+    
     def __str__(self):
         return unicode(self)
     
     def __unicode__(self):
-        return json.encode(self, )
+        return unicode(dict(self))
     
     def _load(self, handler=None):
         if not handler:
@@ -181,10 +204,10 @@ class BaseItem(object):
     def inflate(self, repr):
         """Take an object representation and use it to inflate this object
         
-            - ``repr`` may be either a JSON string or a python dictionary.
+            - ``repr`` must be coercible into a functional python dictionary.
             
-        If a different format that JSON or a python dict is available, the 
-        handling code should do the coercion prior to an inflation attempt.
+        If a different format than a python dict is available, the handling 
+        code should do the coercion prior to an inflation attempt.
         """
         repr = dict(repr)
         for key, val in repr:
@@ -213,7 +236,7 @@ class BaseItem(object):
         
         This method literally calls dict(self).
         
-        If a different format that a python dict is preferable, the 
+        If a different format than a python dict is preferable, the 
         handling code should do the coercion from a provided format (such
         as taking the deflated dict and munging that how it desires).
         """
@@ -311,7 +334,7 @@ class BaseRequirement(object):
     
 class GroupRequirement(BaseRequirement):
     """Evaluate a Group of Conditions"""
-    def __init__(self, cond_list, grouping="all", item=None):
+    def __init__(self, cond_list, grouping="all", group_name=None, item=None):
         """
             - cond_list :  A list of callables which evaluate to a boolean 
                 value.
@@ -328,8 +351,12 @@ class GroupRequirement(BaseRequirement):
             self._grouping = len(self._func_list)
         else:
             self._grouping = grouping
-        #If item isn't set _now_, it _should_ be set in __new__
+        # If item isn't set _now_, it _should_ be set in __new__
         self._item = item
+        
+        # Wouldn't it be nice if we had a name for our group?  That seems
+        # like it could make errors _so_ much cleaner.
+        self._group_name = group_name
     
     def validate(self):
         """
@@ -348,7 +375,7 @@ class GroupRequirement(BaseRequirement):
                 u"Item of type %s failed a %s on a condition (%s)." % (
                     self._item.__class__.__name__, 
                     self.__class__.__name__, 
-                    func.__name__,
+                    self._group_name or repr(func),
                 ))
         super(GroupRequirement, self).validate()
 
@@ -357,7 +384,11 @@ def require_one_of(*args):
     ``args`` should be a list of Field objects.  Take this list and build an
     appropriate GroupRequirement.
     """
-    return GroupRequirement(map(lambda x:x.is_set, args), grouping=1)
+    return GroupRequirement(
+            map(lambda x:x.is_set, args), 
+            group_name=" ".join(map(lambda x:x._name, args)), 
+            grouping="any",
+           )
     
     
 def require_any_of(*args):
@@ -365,7 +396,11 @@ def require_any_of(*args):
     ``args`` should be a list of Field objects.  Take this list and build an
     appropriate GroupRequirement.
     """
-    return GroupRequirements(map(lambda x:x.is_set, args), grouping="any")
+    return GroupRequirements(
+            map(lambda x:x.is_set, args), 
+            group_name=" ".join(map(lambda x:x._name, args)), 
+            grouping="any",
+           )
 
 
 ##############################################################################
@@ -389,7 +424,7 @@ class Distro(BaseItem):
     
     kernel_options = DictField()
     kernel_options_post_install = DictField(
-            display_name=u"Kernel Options (Post Install",
+            display_name=u"Kernel Options (Post Install)",
         )
     
     kickstart_metadata = DictField()
