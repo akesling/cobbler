@@ -11,6 +11,9 @@ import simplejson as json
 import logging
 _log = logging.getLogger('objects')
 
+# A list which records all item types created
+_item_types = []
+
 ##############################################################################
 ### The Heart of the Matter ##################################################
 
@@ -30,11 +33,15 @@ class BaseField(object):
     __metaclass__ = MetaField
     
     _coerce = lambda x:x
+    _type = type(None)
     default = None
     tags = []
     
     def __init__(self, default=None, tooltip=None, display_name=None, tags=None,
                  visible=True):
+        # Maybe add an inheritable attribute?  Is there any way to make it such
+        # that you don't have to manually define default="<<inherit>>" every
+        # time you do this?
         self.default = default or type(self).default
         self.tags = list(tags or type(self).tags)
         self.visible = bool(visible)
@@ -54,13 +61,22 @@ class BaseField(object):
         return self.__unicode__()
     
     def get(self):
+        """This Field's getter"""
         return self._value
     
     def set(self):
+        """This Field's setter"""
         if type(self) is not BaseField:
             super(type(self), self).__set__(instance, self._coerce(value))
         else:
             self._value = value
+    
+    def is_set(self):
+        """Check if this Field has be set."""
+        if self._value != self.default:
+            return True
+        else:
+            return False
     
     def validate(self):
         """The most basic Field validation method
@@ -75,7 +91,7 @@ class BaseField(object):
                 appropriate Exception which subclasses the 
                 CobblerValidationException.
         """
-        if self.default is not None and type(self.default) is self._type:
+        if self.default is not None and isinstance(self.default, self._type):
             return True
         else:
             raise InvalidDefault(
@@ -126,11 +142,83 @@ class MetaItem(type):
                             map(str.capitalize, val._name.split("_")))
                 attrs['_fields'].append(name)
         
+        # Record the type of new items so we can ask for these later
+        if cls_name is not 'BaseItem':
+            _item_types.append(cls_name)
+        
         return super(MetaItem, cls).__new__(cls, name, bases, attrs)
 
 
 class BaseItem(object):
+    """The Most Basic Item Class (From Which All Are Derived)
+    
+        - ``_requirements`` is a list of meta-requirements associated with the 
+            given item.  Things which find their way here are generic enough
+            problems that they have they own specification method outside of
+            either an Item's or its Fields' validation methods.
+    """
     __metaclass__ = MetaItem
+    _requirements = []
+    
+    def __init__(self, load_handler, store_handler):
+        self._load_handler = load_handler
+        self._store_handler = store_handler
+    
+    def __str__(self):
+        return unicode(self)
+    
+    def __unicode__(self):
+        return json.encode(self, )
+    
+    def _load(self, handler=None):
+        if not handler:
+            self._load_handler(self)
+    
+    def _store(self, handler=None):
+        if not handler:
+            self._store_handler(self)
+    
+    def inflate(self, repr):
+        """Take an object representation and use it to inflate this object
+        
+            - ``repr`` may be either a JSON string or a python dictionary.
+            
+        If a different format that JSON or a python dict is available, the 
+        handling code should do the coercion prior to an inflation attempt.
+        """
+        repr = dict(repr)
+        for key, val in repr:
+            try:
+                attr = getattr(self, key)
+                if isinstance(attr, BaseField):
+                    attr.set(val)
+            except AttributeError:
+                # Please ignore the fact that this attribute doesn't exist
+                #   it is effectively unnecessary to log it (unless you
+                #   _really_really_ want to.
+                #
+                # The try-block is used over a conditional, since it is
+                #   the exceptional case that an attribute in a representation
+                #   is not valid.  
+                #
+                # It _is_not_ the Item's responsibility to check validity of
+                #   representations, only to check the validity of itself.
+                #
+                # Handling code which is introducing the representation should
+                #   verify its validity all on its own.
+                pass
+    
+    def deflate(self):
+        """Return ``self`` as an object representation
+        
+        This method literally calls dict(self).
+        
+        If a different format that a python dict is preferable, the 
+        handling code should do the coercion from a provided format (such
+        as taking the deflated dict and munging that how it desires).
+        """
+        return dict(self)
+                
     
     def validate(self):
         """The most basic Item validation method
@@ -143,11 +231,19 @@ class BaseItem(object):
         """
         for fld_name in self._fields:
             getattr(self, fld_name).validate()
+        for req in _requirements:
+            req.validate()
         return True
 
 
 ##############################################################################
 ### Default Fields ###########################################################
+
+
+class BoolField(BaseField):
+    default = False
+    _coerce = bool
+    _type = bool
 
 
 class DictField(BaseField):
@@ -175,7 +271,7 @@ class ListField(BaseField):
 
 
 class StrField(BaseField):
-    default = ""
+    default = u""
     _coerce = unicode
     _type = unicode
 
@@ -202,6 +298,76 @@ class ChoiceField(StrField):
         super(ChoiceField, self).validate()
 
 
+
+##############################################################################
+### Requirements And Their Builders/Helpers ##################################
+
+
+class BaseRequirement(object):
+    def validate(self):
+        """Validate the Given Requirement"""
+        return True
+
+    
+class GroupRequirement(BaseRequirement):
+    """Evaluate a Group of Conditions"""
+    def __init__(self, cond_list, grouping="all", item=None):
+        """
+            - cond_list :  A list of callables which evaluate to a boolean 
+                value.
+            - grouping :  A number, "any", or "all"... Defines how many of the
+                callables must evaluate to true in order to pass the 
+                requirement. Negative values are treated as "at least" this 
+                many, while positive values are treated as "exactly" this many.
+                "any" effectively evaluates to -1.
+        """
+        self._cond_list = cond_list
+        if grouping is "any":
+            self._grouping = -1
+        if grouping is "all":
+            self._grouping = len(self._func_list)
+        else:
+            self._grouping = grouping
+        #If item isn't set _now_, it _should_ be set in __new__
+        self._item = item
+    
+    def validate(self):
+        """
+        Verify that the number of passing conditions matches the ``grouping`` 
+        value set at instantiation.
+        """
+        
+        passed = 0
+        for cond in self._cond_list:
+            if cond():
+                 passed += 1
+        if ((self._grouping < 0 and passed < abs(self._grouping)) or \
+            passed < self._grouping):
+            
+            raise InvalidRequirement(
+                u"Item of type %s failed a %s on a condition (%s)." % (
+                    self._item.__class__.__name__, 
+                    self.__class__.__name__, 
+                    func.__name__,
+                ))
+        super(GroupRequirement, self).validate()
+
+def require_one_of(*args):
+    """
+    ``args`` should be a list of Field objects.  Take this list and build an
+    appropriate GroupRequirement.
+    """
+    return GroupRequirement(map(lambda x:x.is_set, args), grouping=1)
+    
+    
+def require_any_of(*args):
+    """
+    ``args`` should be a list of Field objects.  Take this list and build an
+    appropriate GroupRequirement.
+    """
+    return GroupRequirements(map(lambda x:x.is_set, args), grouping="any")
+
+
 ##############################################################################
 ### Default Items ############################################################
 
@@ -212,10 +378,26 @@ class ChoiceField(StrField):
 
 
 class Distro(BaseItem):
+    _requirements = []
+    
     name = StrField()
     owners = ListField()
-
-
+    
+    #profile = ItemChoiceField(choices=Profile)
+    #image = ItemChoiceField(choices=Image)
+    #_requirements.append(require_one_of(profile, image))
+    
+    kernel_options = DictField()
+    kernel_options_post_install = DictField(
+            display_name=u"Kernel Options (Post Install",
+        )
+    
+    kickstart_metadata = DictField()
+    kickstart = StrField(default=u"<<inherit>>")
+    comment = StrField(tags=[u"TextField"])
+    netboot_enable = BoolField()
+    
+    
 class Image(BaseItem):
     pass
 
@@ -242,9 +424,21 @@ class CobblerValidationException(Exception):
     pass
 
 
+class InvalidRequirement(CobblerValidationException):
+    pass
+
+
 class InvalidDefault(CobblerValidationException):
     pass
 
 
 class InvalidChoice(CobblerValidationException):
+    pass
+
+
+class TypeNotFound(CobblerValidationException):
+    pass
+
+
+class InvalidFormat(CobblerValidationException):
     pass
