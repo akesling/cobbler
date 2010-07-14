@@ -6,6 +6,10 @@ as Django's Model and Form APIs.
 
 __docformat__ = 'restructuredtext en'
 
+import time, datetime
+
+from store_exceptions import *
+
 import logging
 LOG_PREFIX = 'store.objects'
 _log = logging.getLogger(LOG_PREFIX)
@@ -37,11 +41,12 @@ class BaseField(object):
     tags = []
     
     def __init__(self, default=None, tooltip=None, display_name=None, tags=None,
-                 visible=True):
+                 visible=True, editable=True):
         # Maybe add an inheritable attribute?  Is there any way to make it such
         # that you don't have to manually define default="<<inherit>>" every
         # time you do this?
         self.default = default or type(self).default
+        self.editable = editable
         self.tags = list(tags or type(self).tags)
         self.visible = bool(visible)
         self._value = self.default
@@ -65,14 +70,11 @@ class BaseField(object):
     
     def set(self):
         """This Field's setter"""
-        if type(self) is not BaseField:
-            super(type(self), self).__set__(instance, self._coerce(value))
-        else:
-            self._value = value
+        self._value = value
     
     def is_set(self):
-        """Check if this Field has be set."""
-        if self._value != self.default:
+        """Check if this Field has been set."""
+        if None != self._value != self.default:
             return True
         else:
             return False
@@ -123,10 +125,15 @@ class MetaItem(type):
         if '_log' not in attrs:
             attrs['_log'] = logging.getLogger(LOG_PREFIX+'.Item.%s' % cls_name)
         
+        
         # Manipulate Field attributes on subclassed Items as needed
-        # The Item class itself shouldn't have any Fields
+        
         if '_fields' not in attrs:
             attrs['_fields'] = []
+        # Make sure that subclassing doesn't destroy field information
+        for base in bases:
+            if hasattr(base, '_fields'):
+                attrs['_fields'].extend(base._fields)
         for name, val in attrs.items():
             if isinstance(val, BaseField):
                 if _log.getEffectiveLevel() <= logging.DEBUG:
@@ -180,6 +187,14 @@ class BaseItem(object):
     __metaclass__ = MetaItem
     _requirements = []
     
+    #Fields
+    # _uid, _mtime, and _ctime management occur within the handlers
+    # primarily because these relate to object management more than
+    # the data an Item represents.
+    _uid = StrField(required=True, editable=False)
+    _mtime = TimeField(required=True, editable=False)
+    _ctime = TimeField(required=True, editable=False)
+    
     def __init__(self, load_handler, store_handler):
         self._load_handler = load_handler
         self._store_handler = store_handler
@@ -195,7 +210,11 @@ class BaseItem(object):
     
     def _load(self, handler=None):
         if not handler:
-            self._load_handler(self)
+            repr = self._load_handler(self._uid)
+        else:
+            repr = handler(self)
+        
+        self.inflate(repr)
     
     def _store(self, handler=None):
         if not handler:
@@ -269,6 +288,16 @@ class BoolField(BaseField):
     _type = bool
 
 
+class DateTimeField(BaseField):
+    # Don't bother coercing datetime... if it's invalid it's invalid
+    _coerce = lambda x:x
+    _type = datetime.datetime
+    
+    def __init__(self, *args, **kwargs):
+        self.default = datetime.datetime.now()
+        super(DateTimeField, self).__init__(self, *args, **kwargs)
+
+
 class DictField(BaseField):
     default = {}
     _coerce = dict
@@ -297,6 +326,12 @@ class StrField(BaseField):
     default = u""
     _coerce = unicode
     _type = unicode
+
+
+class TimeField(FloatField):
+    def __init__(self, *args, **kwargs):
+        self.default = time.time()
+        super(TimeField, self).__init__(self, *args, **kwargs)
 
 
 #class StrawberryField(BaseField):
@@ -446,34 +481,4 @@ class System(BaseItem):
 
 
 class Repo(BaseItem):
-    pass
-
-
-##############################################################################
-### Object Store Exceptions ##################################################
-
-## Validation exceptions ####################################################
-
-
-class CobblerValidationException(Exception):
-    pass
-
-
-class InvalidRequirement(CobblerValidationException):
-    pass
-
-
-class InvalidDefault(CobblerValidationException):
-    pass
-
-
-class InvalidChoice(CobblerValidationException):
-    pass
-
-
-class TypeNotFound(CobblerValidationException):
-    pass
-
-
-class InvalidFormat(CobblerValidationException):
     pass
