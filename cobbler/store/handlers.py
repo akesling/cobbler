@@ -18,20 +18,58 @@ based off of those provided.
 
 from store_exceptions import *
 
+types = (
+    'base',
+)
+
 ##############################################################################
 ### Base Handlers ############################################################
 
-def base_boot_handler():
-    pass
+_active_items = []
+_items = {}
 
-def base_find_handler(criteria):
-    pass
+def base_boot_handler():
+    return True
+
+def base_find_handler(criteria, slice=['uid']):
+    def slice_item(item, slice):
+        print item
+        record = []
+        for attr in slice:
+            record.append(getattr(item, attr).get())
+        return tuple(record)
+    
+    result = []
+    for uid, item in _items.iteritems():
+        for name, value in criteria.iteritems():
+            if getattr(item, name).get() != value:
+                break
+        else:
+            result.append(item)
+    return map(lambda x: slice_item(x, slice), result)
 
 def base_load_handler(uid):
-    pass
+    try:
+        return _items[uid]
+    except KeyError:
+        raise ItemNotFound(
+            "The Item you have requested with uid %s does not exist." % uid)
+    return True
 
 def base_store_handler(item):
-    pass
+    if item._uid in _active_items:
+        _items[item._uid] = item
+    return True
+    
+def base_register_handler(uid):
+    _active_items.append(uid)
+    return True
+
+def base_remove_handler(uid):
+    _active_items.remove(uid)
+    if uid in _items:
+        del _items[uid] 
+    return True
 
 ##############################################################################
 ### Other Handlers ###########################################################

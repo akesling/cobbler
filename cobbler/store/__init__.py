@@ -80,7 +80,7 @@ def set(obj):
 def find(criteria, source='base'):
     if source not in handlers.types:
         raise InvalidSource(
-            "The object source of %s is not provided." % source)
+            "The object source of '%s' is not provided." % source)
     
     return getattr(handlers, source+'_find_handler')(criteria)
 
@@ -95,11 +95,12 @@ def new(obj_type, source='base'):
             store_handler=handlers.base_store_handler,
         )
         ctime = time.time()
-        obj._uid = _create_uid(ctime)
-        obj._ctime = cur_time
-        obj._mtime = cur_time
+        obj._uid.set(_create_uid(ctime))
+        obj._ctime.set(ctime)
+        obj._mtime.set(ctime)
+        # Make the object store aware there is a new unstored Item
+        handlers.base_register_handler(obj._uid)
         return obj
     else:
         raise objects.TypeNotFound(
             "The object type %s is not presently defined." % obj_type)
-

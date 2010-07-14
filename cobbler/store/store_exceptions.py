@@ -16,6 +16,10 @@ class InvalidDefault(CobblerValidationException):
     pass
 
 
+class InvalidValue(CobblerValidationException):
+    pass
+
+
 class InvalidChoice(CobblerValidationException):
     pass
 
@@ -31,5 +35,13 @@ class InvalidFormat(CobblerValidationException):
 ## Handler Exceptions #######################################################
 
 
-class InvalidSource(CobblerValidationException):
+class CobblerHandlerException(Exception):
+    pass
+
+
+class InvalidSource(CobblerHandlerException):
+    pass
+
+
+class ItemNotFound(CobblerHandlerException):
     pass

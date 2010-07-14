@@ -41,7 +41,7 @@ class BaseField(object):
     tags = []
     
     def __init__(self, default=None, tooltip=None, display_name=None, tags=None,
-                 visible=True, editable=True):
+                 visible=True, editable=True, required=False):
         # Maybe add an inheritable attribute?  Is there any way to make it such
         # that you don't have to manually define default="<<inherit>>" every
         # time you do this?
@@ -50,6 +50,11 @@ class BaseField(object):
         self.tags = list(tags or type(self).tags)
         self.visible = bool(visible)
         self._value = self.default
+        
+        # TODO: fix validate code for requirement... at the moment it catches
+        #       on default being None... but it doesn't output a clean error
+        self.required = required
+        self.default = None
     
     def __set__(self, instance, value):
         self.set(value)
@@ -68,9 +73,9 @@ class BaseField(object):
         """This Field's getter"""
         return self._value
     
-    def set(self):
+    def set(self, value):
         """This Field's setter"""
-        self._value = value
+        self._value = self._coerce(value)
     
     def is_set(self):
         """Check if this Field has been set."""
@@ -92,12 +97,96 @@ class BaseField(object):
                 appropriate Exception which subclasses the 
                 CobblerValidationException.
         """
-        if self.default is not None and isinstance(self.default, self._type):
+        if self._value is not None and isinstance(self._value, self._type):
             return True
         else:
-            raise InvalidDefault(
-                    u"Field of type %s does not have a valid default value." %
-                    self.__class__.__name__)
+            raise InvalidValue(
+                    u"Field '%s' of type '%s' does not " \
+                    u"have a valid value (%s)." %
+                    (self._name, self.__class__.__name__, self._value))
+
+
+##############################################################################
+### Default Fields ###########################################################
+
+
+class BoolField(BaseField):
+    default = False
+    _coerce = bool
+    _type = bool
+
+
+class DateTimeField(BaseField):
+    # Don't bother coercing datetime... if it's invalid it's invalid
+    _coerce = lambda x:x
+    _type = datetime.datetime
+    
+    def __init__(self, *args, **kwargs):
+        self.default = datetime.datetime.now()
+        super(DateTimeField, self).__init__(self, *args, **kwargs)
+
+
+class DictField(BaseField):
+    default = {}
+    _coerce = dict
+    _type = dict
+
+
+class FloatField(BaseField):
+    default = 0.0
+    _coerce = float
+    _type = float
+
+
+class IntField(BaseField):
+    default = 0
+    _coerce = int
+    _type = int
+
+
+class ListField(BaseField):
+    default = []
+    _coerce = list
+    _type = list
+
+
+class StrField(BaseField):
+    default = u""
+    _coerce = unicode
+    _type = unicode
+
+
+class TimeField(FloatField):
+    default = 0.0
+    def __init__(self, *args, **kwargs):
+        self.default = time.time()
+        super(TimeField, self).__init__(self, *args, **kwargs)
+
+
+#class StrawberryField(BaseField):
+#   def forever(self):
+#       return self.forever()
+
+
+##############################################################################
+### Extended Fields ##########################################################
+
+
+class ChoiceField(StrField):
+    def __init__(self, choices, **kwargs):
+        self.choices = list(choices)
+        super(ChoiceField, self).__init__(**kwargs)
+    
+    def validate(self):
+        if self._value not in self.choices:
+            raise InvalidChoice(
+            u"Field of type %s contains a value not in its list of choices." %
+            self.__class__.__name__)
+        super(ChoiceField, self).validate()
+
+
+##############################################################################
+### Items ####################################################################
 
 
 class MetaItem(type):
@@ -130,10 +219,15 @@ class MetaItem(type):
         
         if '_fields' not in attrs:
             attrs['_fields'] = []
-        # Make sure that subclassing doesn't destroy field information
+        if '_requirements' not in attrs:
+            attrs['_requirements'] = []
+        # Make sure that subclassing doesn't destroy field or requirement 
+        # information
         for base in bases:
             if hasattr(base, '_fields'):
                 attrs['_fields'].extend(base._fields)
+            if hasattr(base, '_requirements'):
+                attrs['_requirements'].extend(base._requirements)
         for name, val in attrs.items():
             if isinstance(val, BaseField):
                 if _log.getEffectiveLevel() <= logging.DEBUG:
@@ -169,7 +263,7 @@ class ItemIterator(object):
         self.item = item
         self.count = 0
     
-    def next():
+    def next(self):
         name = self.item._fields[self.count]
         field = getattr(self.item, name)
         self.count += 1
@@ -273,87 +367,9 @@ class BaseItem(object):
         """
         for fld_name in self._fields:
             getattr(self, fld_name).validate()
-        for req in _requirements:
+        for req in self._requirements:
             req.validate()
         return True
-
-
-##############################################################################
-### Default Fields ###########################################################
-
-
-class BoolField(BaseField):
-    default = False
-    _coerce = bool
-    _type = bool
-
-
-class DateTimeField(BaseField):
-    # Don't bother coercing datetime... if it's invalid it's invalid
-    _coerce = lambda x:x
-    _type = datetime.datetime
-    
-    def __init__(self, *args, **kwargs):
-        self.default = datetime.datetime.now()
-        super(DateTimeField, self).__init__(self, *args, **kwargs)
-
-
-class DictField(BaseField):
-    default = {}
-    _coerce = dict
-    _type = dict
-
-
-class FloatField(BaseField):
-    default = 0.0
-    _coerce = float
-    _type = float
-
-
-class IntField(BaseField):
-    default = 0
-    _coerce = int
-    _type = int
-
-
-class ListField(BaseField):
-    default = []
-    _coerce = list
-    _type = list
-
-
-class StrField(BaseField):
-    default = u""
-    _coerce = unicode
-    _type = unicode
-
-
-class TimeField(FloatField):
-    def __init__(self, *args, **kwargs):
-        self.default = time.time()
-        super(TimeField, self).__init__(self, *args, **kwargs)
-
-
-#class StrawberryField(BaseField):
-#   def forever(self):
-#       return self.forever()
-
-
-##############################################################################
-### Extended Fields ##########################################################
-
-
-class ChoiceField(StrField):
-    def __init__(self, choices, **kwargs):
-        self.choices = list(choices)
-        super(ChoiceField, self).__init__(**kwargs)
-    
-    def validate(self):
-        if self._value not in self.choices:
-            raise InvalidChoice(
-            u"Field of type %s contains a value not in its list of choices." %
-            self.__class__.__name__)
-        super(ChoiceField, self).validate()
 
 
 
