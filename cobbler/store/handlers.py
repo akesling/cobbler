@@ -31,13 +31,16 @@ _items = {}
 def base_boot_handler():
     return True
 
-def base_find_handler(criteria, slice=['uid']):
+def base_find_handler(criteria, slice=['_uid']):
     def slice_item(item, slice):
-        print item
         record = []
         for attr in slice:
             record.append(getattr(item, attr).get())
         return tuple(record)
+    
+    slice = list(slice)
+    if '_uid' not in slice:
+        slice.insert(0, '_uid')
     
     result = []
     for uid, item in _items.iteritems():
@@ -57,8 +60,8 @@ def base_load_handler(uid):
     return True
 
 def base_store_handler(item):
-    if item._uid in _active_items:
-        _items[item._uid] = item
+    if item._uid.get() in _active_items:
+        _items[item._uid.get()] = item
     return True
     
 def base_register_handler(uid):

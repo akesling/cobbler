@@ -9,6 +9,7 @@ __docformat__ = 'restructuredtext en'
 import time, datetime
 
 from store_exceptions import *
+import __init__ as store
 
 import logging
 LOG_PREFIX = 'store.objects'
@@ -16,6 +17,10 @@ _log = logging.getLogger(LOG_PREFIX)
 
 # A list which records all item types created
 _item_types = []
+
+# TODO: Implement Field value inheritance.  This will likely be done through 
+#       The declaration of a _parent Field on the child, and "<<inherit>>"
+#       being the value of the field when inheritance is desirable.
 
 ##############################################################################
 ### The Heart of the Matter ##################################################
@@ -45,16 +50,21 @@ class BaseField(object):
         # Maybe add an inheritable attribute?  Is there any way to make it such
         # that you don't have to manually define default="<<inherit>>" every
         # time you do this?
-        self.default = default or type(self).default
+        if default:
+            self.default = self._coerce(default)
+        else:
+            self.default = self._coerce(self.default)
+        
         self.editable = editable
         self.tags = list(tags or type(self).tags)
         self.visible = bool(visible)
-        self._value = self.default
+        self._value = None
         
         # TODO: fix validate code for requirement... at the moment it catches
         #       on default being None... but it doesn't output a clean error
         self.required = required
-        self.default = None
+        if not default and required:
+            self.default = None
     
     def __set__(self, instance, value):
         self.set(value)
@@ -71,7 +81,10 @@ class BaseField(object):
     
     def get(self):
         """This Field's getter"""
-        return self._value
+        if self._value is not None:
+            return self._value
+        else:
+            return self.default
     
     def set(self, value):
         """This Field's setter"""
@@ -86,18 +99,23 @@ class BaseField(object):
     
     def validate(self):
         """The most basic Field validation method
+        This method verifies that the value returned by ``get()`` is not None
+        and that it is of the type defined by ``self._type``.
         
         ``validate`` may be called directly, but is mainly called when 
-        ``validate``ing an Item (this happens when trying to save an item 
-        back to the object store for example).
+        validating an Item.  You can (and should) validate all Items you 
+        are working on whenever you need to check validity, but be aware that 
+        this routine is also called when trying to save an Item back to the 
+        object store.
         
         Expected results from calling ``validate``:
-            - If the field is valid, ``validate`` returns a True value.
-            - If the field is invalid, ``validate`` will ``raise`` an 
-                appropriate Exception which subclasses the 
+            * If the field is valid, ``validate`` returns a True value.
+            * If the field is invalid, ``validate`` will ``raise`` an 
+                appropriate Exception which subclasses
                 CobblerValidationException.
         """
-        if self._value is not None and isinstance(self._value, self._type):
+        value = self.get()
+        if value is not None and isinstance(value, self._type):
             return True
         else:
             raise InvalidValue(
@@ -157,10 +175,9 @@ class StrField(BaseField):
 
 
 class TimeField(FloatField):
-    default = 0.0
     def __init__(self, *args, **kwargs):
         self.default = time.time()
-        super(TimeField, self).__init__(self, *args, **kwargs)
+        super(TimeField, self).__init__(*args, **kwargs)
 
 
 #class StrawberryField(BaseField):
@@ -173,9 +190,9 @@ class TimeField(FloatField):
 
 
 class ChoiceField(StrField):
-    def __init__(self, choices, **kwargs):
+    def __init__(self, choices, *args, **kwargs):
         self.choices = list(choices)
-        super(ChoiceField, self).__init__(**kwargs)
+        super(ChoiceField, self).__init__(*args, **kwargs)
     
     def validate(self):
         if self._value not in self.choices:
@@ -183,6 +200,24 @@ class ChoiceField(StrField):
             u"Field of type %s contains a value not in its list of choices." %
             self.__class__.__name__)
         super(ChoiceField, self).validate()
+
+
+class ItemField(StrField):
+    
+    def __init__(self, item_type, *args, **kwargs):
+        self.item_type = item_type
+        super(ItemField, self).__init__(*args, **kwargs)
+    
+    def validate(self):
+        if not len(store.find({'_type': self.item_type, 'name': self.get()})):
+            raise InvalidItem(
+                u"The Item of the given name (%s) " \
+                "and type (%s) cannot be found." %
+                (self.get(), self.item_type))
+                
+        return super(ItemField, self).validate()
+        
+    
 
 
 ##############################################################################
@@ -245,35 +280,38 @@ class MetaItem(type):
         # Bind the object's name to it's requirements so that we
         # can return clearer errors.
         for req in attrs['_requirements']:
-            if not req._item:
+            if not callable(req) and not req._item:
                 req._item = item
         
         # Record the type of new items so we can ask for these later
         if cls_name is not 'BaseItem':
             _item_types.append(cls_name)
         
-        return super(MetaItem, cls).__new__(cls, name, bases, attrs)
+        return super(MetaItem, cls).__new__(cls, cls_name, bases, attrs)
 
 
 class ItemIterator(object):
     #Because having __dict__ is absolutely unnecessary
-    __slots__ = ['item', 'count']
+    __slots__ = ['item', 'count', 'len']
     
     def __init__(self, item):
         self.item = item
+        self.len = len(item._fields)
         self.count = 0
     
     def next(self):
+        if self.count >= self.len:
+            raise StopIteration()
         name = self.item._fields[self.count]
-        field = getattr(self.item, name)
+        value = getattr(self.item, name).get()
         self.count += 1
-        return name, field
+        return name, value
 
 
 class BaseItem(object):
     """The Most Basic Item Class (From Which All Are Derived)
     
-        - ``_requirements`` is a list of meta-requirements associated with the 
+        * ``_requirements`` is a list of meta-requirements associated with the 
             given item.  Things which find their way here are generic enough
             problems that they have they own specification method outside of
             either an Item's or its Fields' validation methods.
@@ -290,6 +328,7 @@ class BaseItem(object):
     _ctime = TimeField(required=True, editable=False)
     
     def __init__(self, load_handler, store_handler):
+        self._errors = []
         self._load_handler = load_handler
         self._store_handler = store_handler
     
@@ -317,7 +356,7 @@ class BaseItem(object):
     def inflate(self, repr):
         """Take an object representation and use it to inflate this object
         
-            - ``repr`` must be coercible into a functional python dictionary.
+            * ``repr`` must be coercible into a functional python dictionary.
             
         If a different format than a python dict is available, the handling 
         code should do the coercion prior to an inflation attempt.
@@ -347,7 +386,7 @@ class BaseItem(object):
     def deflate(self):
         """Return ``self`` as an object representation
         
-        This method literally calls dict(self).
+        This method literally calls ``dict(self)``.
         
         If a different format than a python dict is preferable, the 
         handling code should do the coercion from a provided format (such
@@ -359,18 +398,40 @@ class BaseItem(object):
     def validate(self):
         """The most basic Item validation method
         
-        The Item's ``validate`` method calls all member Fields' ``validate``
-        methods, and returns ``True`` if they all pass.  If one does not
-        pass, that Field will have thrown an exception which subclasses 
-        CobblerValidationException.  This method does not catch such 
-        exceptions.
+        The Item's ``validate`` method calls all member Fields' and 
+        Requirements'``validate`` methods, catching any 
+        CobblerValidationExceptions thrown on failure of Field and/or 
+        Requirement validation.
+        
+        You can (and should) validate all Items you are working on whenever 
+        you need to check validity, but be aware that this routine is also 
+        called when trying to save an Item back to the object store.
+        
+        Expected results from calling ``validate``:
+            * If all Fields and Requirements are valid, ``validate`` returns 
+                a ``True`` value.
+            * If any Field or Requirement is invalid, ``validate`` will save 
+                the associated exceptions in ``self._errors`` and return a 
+                ``False`` value.
         """
+        # Assume this Item is valid until proven otherwise.
+        valid = True
+        self._errors = []
         for fld_name in self._fields:
-            getattr(self, fld_name).validate()
+            try:
+                getattr(self, fld_name).validate()
+            except CobblerValidationException, cve:
+                valid = False
+                self._errors.append((fld_name, cve))
         for req in self._requirements:
-            req.validate()
-        return True
-
+            if callable(req): req = req(self)
+            
+            try:
+                req.validate()
+            except CobblerValidationException, cve:
+                valid = False
+                self._errors.append((req._group_name, cve))
+        return valid
 
 
 ##############################################################################
@@ -434,25 +495,45 @@ def require_one_of(*args):
     """
     ``args`` should be a list of Field objects.  Take this list and build an
     appropriate GroupRequirement.
-    """
-    return GroupRequirement(
-            map(lambda x:x.is_set, args), 
-            group_name=" ".join(map(lambda x:x._name, args)), 
-            grouping="any",
-           )
     
+    It should be noted that requirement generation may be lazily evaluated
+    (as it is in the case of this function).  Lazy evaluation is faked in the
+    requirements system by allowing requirements passed into an Item to be a
+    callable which builds and returns a requirement.
+    """
+    def lazy(item): 
+        req = GroupRequirement(
+            map(lambda x:x.is_set, args), 
+            group_name="Require One of: %s" % 
+                ", ".join(map(lambda x:x._name, args)), 
+            grouping="1",
+        )
+        req._item = item
+        return req
+
+    return lazy
     
 def require_any_of(*args):
     """
     ``args`` should be a list of Field objects.  Take this list and build an
     appropriate GroupRequirement.
+    
+    It should be noted that requirement generation may be lazily evaluated
+    (as it is in the case of this function).  Lazy evaluation is faked in the
+    requirements system by allowing requirements passed into an Item to be a
+    callable which builds and returns a requirement.
     """
-    return GroupRequirements(
+    def lazy(item): 
+        req = GroupRequirement(
             map(lambda x:x.is_set, args), 
-            group_name=" ".join(map(lambda x:x._name, args)), 
+            group_name="Require Any of: %s" % 
+                ", ".join(map(lambda x:x._name, args)), 
             grouping="any",
-           )
-
+        )
+        req._item = item
+        return req
+    
+    return lazy
 
 ##############################################################################
 ### Default Items ############################################################
@@ -466,12 +547,16 @@ def require_any_of(*args):
 class Distro(BaseItem):
     _requirements = []
     
-    name = StrField()
+    name = StrField(required=True)
     owners = ListField()
     
-    #profile = ItemChoiceField(choices=Profile)
-    #image = ItemChoiceField(choices=Image)
-    #_requirements.append(require_one_of(profile, image))
+    # XXX: If one of these is set it needs to be resolved that the other won't
+    #       inherit....
+    # XXX: Also, how will the group requirement deal with default being set
+    #       on both Fields?
+    profile = ItemField(item_type='Profile', default="<<inherit>>")
+    image = ItemField(item_type='Image', default="<<inherit>>")
+    _requirements.append(require_one_of(profile, image))
     
     kernel_options = DictField()
     kernel_options_post_install = DictField(

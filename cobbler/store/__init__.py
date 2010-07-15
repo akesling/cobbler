@@ -12,7 +12,8 @@
     
     It should, however, be noted that there are still certain reserved
     keywords, such as ``validate``, which are not available for Field
-    assignment.
+    assignment. An effort is made to make sure all such names are actions
+    though, so that shouldn't be a problem when naming Fields.
 """
 
 from store_exceptions import *
@@ -36,6 +37,13 @@ __all__ = (
 
 
 def _create_uid(ctime=None):
+    """Create a nice shiny new UID
+        * ``ctime``
+            If you desire a UID for an object which was create at time 
+            ``ctime`` then you may provide that value.
+     
+        * Return value is a canonical Cobbler UID.
+    """
     # It _really_ doesn't matter what style of UID is used, as long as they
     # are unique.
     
@@ -52,6 +60,17 @@ def _create_uid(ctime=None):
 
 
 def get(uid, source='base'):
+    """Get the Item represented by the provided UID
+    
+        * ``uid``
+            A valid UID.
+        * ``source``
+            The origin for the handlers used.  ``base`` represents the
+            default *internal* handler used by cobbler, but other handler
+            sources are planned to be provided.
+        
+        * Return value is an Item object.
+    """
     if source not in handlers.types:
         raise InvalidSource()
     
@@ -67,40 +86,89 @@ def get(uid, source='base'):
 
 
 def get_types():
+    """Return all types available along with their signatures
+    
+        * Return value is a list of 2-tuples where the first item is the 
+            Type's name and the second item is the Type's signature as a
+            dictionary.
+    """
     # TODO: Allow getting of types other than base types
     return objects._item_types
 
 
-def set(obj):
+def set(item):
+    """Store provided Item in the Object Store
+    
+        * ``item``
+            The item to store in the Object Store.
+     
+        * Return value is ``True`` on successful call to the ``validate`` 
+            method of the provided Item, and ``False`` when validation fails.
+            If errors are desired, they may be found directly one the object 
+            so there is no need to return them.
+    """
     # TODO: This should handle logging of validation exceptions
-    obj.validate()
-    obj._store()
+    if item.validate():
+        item._store()
+        return True
+    else:
+        return False
 
 
-def find(criteria, source='base'):
+def find(criteria, slice=["_uid"], source='base'):
+    """Find items matching the given criteria
+    
+        * ``criteria``
+            A dictionary mapping Field name to value required to match.
+        * ``slice``
+            A list of the desired object attributes.        
+        * ``source``
+            The origin for the handlers used.  ``base`` represents the
+            default *internal* handler used by cobbler, but other handler
+            sources are planned to be provided.
+    
+        * Return a list of tuples containing the requested information.  
+            The tuples returned will be ordered in the same fashion as 
+            ``slice``.  Whether specified in the slice list or not, the 
+            first property in the tuples returned will always be that 
+            Item's ``_uid``.
+    """
     if source not in handlers.types:
         raise InvalidSource(
             "The object source of '%s' is not provided." % source)
     
-    return getattr(handlers, source+'_find_handler')(criteria)
+    return getattr(handlers, source+'_find_handler')(criteria, slice)
 
 
-def new(obj_type, source='base'):
+def new(item_type, source='base'):
+    """Request a blank Item of the provided type
+    
+        * ``item_type``
+            The type of Item which you would like.
+        * ``source``
+            The origin for the handlers used.  ``base`` represents the
+            default *internal* handler used by cobbler, but other handler
+            sources are planned to be provided.
+     
+        * Return value is a blank Item with the default handlers bound 
+            to it and populated with its own UID, Creation Time, 
+            and Modification Time.
+    """
     if source not in handlers.types:
         raise InvalidSource()
     
-    if obj_type in get_types():
-        obj = getattr(objects, obj_type)(
+    if item_type in get_types():
+        item = getattr(objects, item_type)(
             load_handler=handlers.base_load_handler,
             store_handler=handlers.base_store_handler,
         )
         ctime = time.time()
-        obj._uid.set(_create_uid(ctime))
-        obj._ctime.set(ctime)
-        obj._mtime.set(ctime)
+        item._uid.set(_create_uid(ctime))
+        item._ctime.set(ctime)
+        item._mtime.set(ctime)
         # Make the object store aware there is a new unstored Item
-        handlers.base_register_handler(obj._uid)
-        return obj
+        handlers.base_register_handler(item._uid)
+        return item 
     else:
         raise objects.TypeNotFound(
             "The object type %s is not presently defined." % obj_type)

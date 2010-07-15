@@ -24,7 +24,11 @@ class InvalidChoice(CobblerValidationException):
     pass
 
 
-class TypeNotFound(CobblerValidationException):
+class InvalidType(CobblerValidationException):
+    pass
+
+
+class InvalidItem(CobblerValidationException):
     pass
 
 
