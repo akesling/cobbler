@@ -4,6 +4,7 @@ This object store design was inspired by the CouchDB Python Library as well
 as Django's Model and Form APIs.
 """
 
+__all__ = []
 __docformat__ = 'restructuredtext en'
 
 import time, datetime
@@ -24,6 +25,10 @@ _item_types = []
 
 ##############################################################################
 ### The Heart of the Matter ##################################################
+
+__all__.extend((
+    'BaseField',
+))
 
 
 class MetaField(type):
@@ -77,7 +82,11 @@ class BaseField(object):
         return unicode(self._value)
     
     def __str__(self):
-        return self.__unicode__()
+        return unicode(self)
+    
+    def __repr__(self):
+        return u"<class '%s': default='%s' >" % \
+            (self.__class__.__name__, unicode(self.default))
     
     def get(self):
         """This Field's getter"""
@@ -99,20 +108,20 @@ class BaseField(object):
     
     def validate(self):
         """The most basic Field validation method
-        This method verifies that the value returned by ``get()`` is not None
-        and that it is of the type defined by ``self._type``.
+        This method verifies that the value returned by ``get()`` is not 
+        None and that it is of the type defined by ``self._type``.
         
         ``validate`` may be called directly, but is mainly called when 
         validating an Item.  You can (and should) validate all Items you 
-        are working on whenever you need to check validity, but be aware that 
-        this routine is also called when trying to save an Item back to the 
-        object store.
+        are working on whenever you need to check validity, but be aware
+        that this routine is also called when trying to save an Item back
+        to the object store.
         
         Expected results from calling ``validate``:
             * If the field is valid, ``validate`` returns a True value.
             * If the field is invalid, ``validate`` will ``raise`` an 
-                appropriate Exception which subclasses
-                CobblerValidationException.
+              appropriate Exception which subclasses
+              CobblerValidationException.
         """
         value = self.get()
         if value is not None and isinstance(value, self._type):
@@ -126,6 +135,17 @@ class BaseField(object):
 
 ##############################################################################
 ### Default Fields ###########################################################
+
+__all__.extend((
+    'BoolField',
+    'DateTimeField',
+    'DictField',
+    'FloatField',
+    'IntField',
+    'ListField',
+    'StrField',
+    'TimeField',
+))
 
 
 class BoolField(BaseField):
@@ -188,6 +208,11 @@ class TimeField(FloatField):
 ##############################################################################
 ### Extended Fields ##########################################################
 
+__all__.extend((
+    'ChoiceField',
+    'ItemField',
+))
+
 
 class ChoiceField(StrField):
     def __init__(self, choices, *args, **kwargs):
@@ -223,6 +248,9 @@ class ItemField(StrField):
 ##############################################################################
 ### Items ####################################################################
 
+__all__.extend((
+    'BaseItem',
+))
 
 class MetaItem(type):
     """Metaclass For All Item Types
@@ -312,9 +340,9 @@ class BaseItem(object):
     """The Most Basic Item Class (From Which All Are Derived)
     
         * ``_requirements`` is a list of meta-requirements associated with the 
-            given item.  Things which find their way here are generic enough
-            problems that they have they own specification method outside of
-            either an Item's or its Fields' validation methods.
+          given item.  Things which find their way here are generic enough
+          problems that they have they own specification method outside of
+          either an Item's or its Fields' validation methods.
     """
     __metaclass__ = MetaItem
     _requirements = []
@@ -356,7 +384,8 @@ class BaseItem(object):
     def inflate(self, repr):
         """Take an object representation and use it to inflate this object
         
-            * ``repr`` must be coercible into a functional python dictionary.
+            * ``repr`` must be coercible into a functional python 
+              dictionary.
             
         If a different format than a python dict is available, the handling 
         code should do the coercion prior to an inflation attempt.
@@ -408,11 +437,11 @@ class BaseItem(object):
         called when trying to save an Item back to the object store.
         
         Expected results from calling ``validate``:
-            * If all Fields and Requirements are valid, ``validate`` returns 
-                a ``True`` value.
-            * If any Field or Requirement is invalid, ``validate`` will save 
-                the associated exceptions in ``self._errors`` and return a 
-                ``False`` value.
+            * If all Fields and Requirements are valid, ``validate`` 
+                returns a ``True`` value.
+            * If any Field or Requirement is invalid, ``validate`` will 
+                save the associated exceptions in ``self._errors`` and 
+                return a ``False`` value.
         """
         # Assume this Item is valid until proven otherwise.
         valid = True
@@ -437,6 +466,12 @@ class BaseItem(object):
 ##############################################################################
 ### Requirements And Their Builders/Helpers ##################################
 
+__all__.extend((
+    'BaseRequirement',
+    'GroupRequirement',
+    'require_one_of',
+    'require_any_of',
+))
 
 class BaseRequirement(object):
     def validate(self):
@@ -472,8 +507,8 @@ class GroupRequirement(BaseRequirement):
     
     def validate(self):
         """
-        Verify that the number of passing conditions matches the ``grouping`` 
-        value set at instantiation.
+        Verify that the number of passing conditions matches the 
+        ``grouping`` value set at instantiation.
         """
         
         passed = 0
@@ -538,6 +573,14 @@ def require_any_of(*args):
 ##############################################################################
 ### Default Items ############################################################
 
+__all__.extend((
+    'Distro',
+    'Image',
+    'Profile',
+    'System',
+    'Repo',
+))
+
 # TODO: This should probably be moved to a nice little configuration location,
 #       since this is effectively going to be user pluggable... at the moment
 #       this is likely unnecessary though, since Cobbler isn't in need of any
@@ -548,6 +591,7 @@ class Distro(BaseItem):
     _requirements = []
     
     name = StrField(required=True)
+    """Name of this distribution"""
     owners = ListField()
     
     # XXX: If one of these is set it needs to be resolved that the other won't

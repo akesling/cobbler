@@ -14,6 +14,7 @@
     keywords, such as ``validate``, which are not available for Field
     assignment. An effort is made to make sure all such names are actions
     though, so that shouldn't be a problem when naming Fields.
+    
 """
 
 from store_exceptions import *
@@ -38,11 +39,15 @@ __all__ = (
 
 def _create_uid(ctime=None):
     """Create a nice shiny new UID
-        * ``ctime``
+    
+    *Arguments:*
+
+        ``ctime``
             If you desire a UID for an object which was create at time 
             ``ctime`` then you may provide that value.
-     
-        * Return value is a canonical Cobbler UID.
+ 
+    *Return Value:*
+        A canonical Cobbler UID.
     """
     # It _really_ doesn't matter what style of UID is used, as long as they
     # are unique.
@@ -62,14 +67,17 @@ def _create_uid(ctime=None):
 def get(uid, source='base'):
     """Get the Item represented by the provided UID
     
-        * ``uid``
+    *Arguments:*
+
+        ``uid``
             A valid UID.
-        * ``source``
+        ``source``
             The origin for the handlers used.  ``base`` represents the
             default *internal* handler used by cobbler, but other handler
             sources are planned to be provided.
-        
-        * Return value is an Item object.
+    
+    *Return Value:*
+        An Item object.
     """
     if source not in handlers.types:
         raise InvalidSource()
@@ -88,9 +96,9 @@ def get(uid, source='base'):
 def get_types():
     """Return all types available along with their signatures
     
-        * Return value is a list of 2-tuples where the first item is the 
-            Type's name and the second item is the Type's signature as a
-            dictionary.
+    *Return Value:*
+        A list of 2-tuples where the first item is the Type's name 
+        and the second item is the Type's signature as a dictionary.
     """
     # TODO: Allow getting of types other than base types
     return objects._item_types
@@ -99,13 +107,16 @@ def get_types():
 def set(item):
     """Store provided Item in the Object Store
     
-        * ``item``
+    *Arguments:*
+    
+        ``item``
             The item to store in the Object Store.
-     
-        * Return value is ``True`` on successful call to the ``validate`` 
-            method of the provided Item, and ``False`` when validation fails.
-            If errors are desired, they may be found directly one the object 
-            so there is no need to return them.
+    
+    *Return Value:*
+        ``True`` on successful call to the ``validate`` method of the 
+        provided Item, and ``False`` when validation fails.  If errors 
+        are desired, they may be found directly on the object so there 
+        is no need to return them.
     """
     # TODO: This should handle logging of validation exceptions
     if item.validate():
@@ -118,20 +129,23 @@ def set(item):
 def find(criteria, slice=["_uid"], source='base'):
     """Find items matching the given criteria
     
-        * ``criteria``
+    *Arguments:*
+    
+        ``criteria``
             A dictionary mapping Field name to value required to match.
-        * ``slice``
+        ``slice``
             A list of the desired object attributes.        
-        * ``source``
-            The origin for the handlers used.  ``base`` represents the
+        ``source``
+            The origin for the handlers used.  ``'base'`` represents the
             default *internal* handler used by cobbler, but other handler
             sources are planned to be provided.
     
-        * Return a list of tuples containing the requested information.  
-            The tuples returned will be ordered in the same fashion as 
-            ``slice``.  Whether specified in the slice list or not, the 
-            first property in the tuples returned will always be that 
-            Item's ``_uid``.
+    *Return Value:*
+        A list of tuples containing the requested information.  
+        The tuples returned will be ordered in the same fashion as 
+        ``slice``.  Whether specified in the slice list or not, the 
+        first property in the tuples returned will always be that 
+        Item's ``_uid``.
     """
     if source not in handlers.types:
         raise InvalidSource(
@@ -143,16 +157,18 @@ def find(criteria, slice=["_uid"], source='base'):
 def new(item_type, source='base'):
     """Request a blank Item of the provided type
     
-        * ``item_type``
+    *Arguments:*
+
+        ``item_type``
             The type of Item which you would like.
-        * ``source``
+        ``source``
             The origin for the handlers used.  ``base`` represents the
             default *internal* handler used by cobbler, but other handler
             sources are planned to be provided.
-     
-        * Return value is a blank Item with the default handlers bound 
-            to it and populated with its own UID, Creation Time, 
-            and Modification Time.
+ 
+    *Return Value:*
+        A blank Item with the default handlers bound to it and populated 
+        with its own UID, Creation Time, and Modification Time.
     """
     if source not in handlers.types:
         raise InvalidSource()
@@ -172,3 +188,4 @@ def new(item_type, source='base'):
     else:
         raise objects.TypeNotFound(
             "The object type %s is not presently defined." % obj_type)
+
