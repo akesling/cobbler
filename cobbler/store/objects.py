@@ -20,7 +20,7 @@ _log = logging.getLogger(LOG_PREFIX)
 _item_types = []
 
 # TODO: Implement Field value inheritance.  This will likely be done through 
-#       The declaration of a _parent Field on the child, and "<<inherit>>"
+#       The declaration of a _parents Field on the child, and "<<inherit>>"
 #       being the value of the field when inheritance is desirable.
 
 ##############################################################################
@@ -51,7 +51,7 @@ class BaseField(object):
     tags = []
     
     def __init__(self, default=None, tooltip=None, display_name=None, tags=None,
-                 visible=True, editable=True, required=False):
+                 visible=True, editable=True, required=False, comment=""):
         # Maybe add an inheritable attribute?  Is there any way to make it such
         # that you don't have to manually define default="<<inherit>>" every
         # time you do this?
@@ -60,6 +60,7 @@ class BaseField(object):
         else:
             self.default = self._coerce(self.default)
         
+        self.comment = unicode(comment)
         self.editable = editable
         self.tags = list(tags or type(self).tags)
         self.visible = bool(visible)
@@ -230,11 +231,27 @@ class ChoiceField(StrField):
 class ItemField(StrField):
     
     def __init__(self, item_type, *args, **kwargs):
-        self.item_type = item_type
+        self.item_type = self._coerce(item_type)
         super(ItemField, self).__init__(*args, **kwargs)
     
+    def get_ref(self):
+        """Get the object which this field represents.
+     
+        *Return Value:*
+            If this field represents a valid Item, then it returns that Item.
+            
+            Else it returns False
+        """
+
+        if self.validate() and bool(self._value) == True:
+            return store.get(
+                store.find({'_type': self.item_type, 'name': self.get()})[0])
+        else:
+            return False
+    
     def validate(self):
-        if not len(store.find({'_type': self.item_type, 'name': self.get()})):
+        if self.required and not 
+                len(store.find({'_type': self.item_type, 'name': self.get()})):
             raise InvalidItem(
                 u"The Item of the given name (%s) " \
                 "and type (%s) cannot be found." %
@@ -242,8 +259,6 @@ class ItemField(StrField):
                 
         return super(ItemField, self).validate()
         
-    
-
 
 ##############################################################################
 ### Items ####################################################################
@@ -278,19 +293,25 @@ class MetaItem(type):
             attrs['_log'] = logging.getLogger(LOG_PREFIX+'.Item.%s' % cls_name)
         
         
+        _attach_fields(cls, cls_name, bases, attrs)
+        _attach_reqs(cls, cls_name, bases, attrs)
+        
+        # Record the type of new items so we can ask for these later
+        if cls_name is not 'BaseItem':
+            _item_types.append(cls_name)
+        
+        return super(MetaItem, cls).__new__(cls, cls_name, bases, attrs)
+    
+    
+    def _attach_fields(cls, cls_name, bases, attrs):
         # Manipulate Field attributes on subclassed Items as needed
         
         if '_fields' not in attrs:
             attrs['_fields'] = []
-        if '_requirements' not in attrs:
-            attrs['_requirements'] = []
-        # Make sure that subclassing doesn't destroy field or requirement 
-        # information
+        # Make sure that subclassing doesn't destroy field information
         for base in bases:
             if hasattr(base, '_fields'):
                 attrs['_fields'].extend(base._fields)
-            if hasattr(base, '_requirements'):
-                attrs['_requirements'].extend(base._requirements)
         for name, val in attrs.items():
             if isinstance(val, BaseField):
                 if _log.getEffectiveLevel() <= logging.DEBUG:
@@ -304,18 +325,24 @@ class MetaItem(type):
                     val.display_name = " ".join(
                             map(str.capitalize, val._name.split("_")))
                 attrs['_fields'].append(name)
-        
+                
+                # And who you're a member of
+                val._item = cls
+    
+    
+    def _attach_reqs(cls, cls_name, bases, attrs):
+        if '_requirements' not in attrs:
+            attrs['_requirements'] = []
+        # Make sure that subclassing doesn't destroy or requirement information
+        for base in bases:
+            if hasattr(base, '_requirements'):
+                attrs['_requirements'].extend(base._requirements)
         # Bind the object's name to it's requirements so that we
         # can return clearer errors.
         for req in attrs['_requirements']:
             if not callable(req) and not req._item:
                 req._item = item
         
-        # Record the type of new items so we can ask for these later
-        if cls_name is not 'BaseItem':
-            _item_types.append(cls_name)
-        
-        return super(MetaItem, cls).__new__(cls, cls_name, bases, attrs)
 
 
 class ItemIterator(object):
@@ -423,6 +450,15 @@ class BaseItem(object):
         """
         return dict(self)
                 
+    def render(self):
+        """By default ``render`` is a synonym for ``deflate``
+        
+        However, if special actions (such as Item level inheritance) are
+        desired at configuration time (such as when generating kickstarts,
+        or when using Koan) then this should be overridden in the Item's
+        declaration.
+        """
+        return self.deflate()
     
     def validate(self):
         """The most basic Item validation method
@@ -587,7 +623,7 @@ __all__.extend((
 #       new Items as yet.
 
 
-class Distro(BaseItem):
+class System(BaseItem):
     _requirements = []
     
     name = StrField(required=True)
@@ -598,10 +634,10 @@ class Distro(BaseItem):
     #       inherit....
     # XXX: Also, how will the group requirement deal with default being set
     #       on both Fields?
-    profile = ItemField(item_type='Profile', default="<<inherit>>")
-    image = ItemField(item_type='Image', default="<<inherit>>")
+    profile = ItemField(item_type='Profile')
+    image = ItemField(item_type='Image')
     _requirements.append(require_one_of(profile, image))
-    
+
     kernel_options = DictField()
     kernel_options_post_install = DictField(
             display_name=u"Kernel Options (Post Install)",
@@ -622,7 +658,84 @@ class Profile(BaseItem):
 
 
 class System(BaseItem):
-    pass
+    _requirements = []
+    
+    name = StrField(required=True)
+    owners = ListField()
+    
+    # XXX: Also, how will the group requirement deal with default being set
+    #       on both Fields?
+    profile = ItemField(item_type='Profile')
+    image = ItemField(item_type='Image')
+    _requirements.append(require_one_of(profile, image))
+    def render(self):
+        rendered = super(System, self).render()
+        profile = self.profile.get_ref().render()
+        image = self.image.get_ref().render()
+        # Since only one of the two should be non-False.
+        parent = profile or image
+        for field, value in rendered:
+            if value == "<<inherit>>":
+               rendered[field] = parent[field] 
+        return rendered
+
+    kernel_options = DictField()
+    kernel_options_post = DictField(
+        display_name=u"Kernel Options (Post Install)",
+        )
+    
+    kickstart_metadata = DictField()
+    kickstart = StrField(
+        default=u"<<inherit>>"
+        inherit=True,
+        )
+    netboot_enabled = BoolField()
+    comment = StrField(tags=[u"TextField"])
+    depth = IntField()
+    server_override = StrField(
+        default="<<inherit>>",
+        comment="See manpage or leave blank",
+        inherit=True,
+        )
+    virt_path = StrField(
+        default="<<inherit>>", 
+        comment="Ex: /directory or VolGroup00"
+        inherit=True,
+        )
+    virt_type = StrField(
+        default="<<inherit>>",
+        comment="Virtualization technology to use",
+        inherit=True,
+        )
+    virt_cpus = IntField(
+        default="<<inherit>>", 
+        inherit=True,
+        )
+    virt_file_size = FloatField(
+        default="<<inherit>>",
+        comment="(GB)",
+        inherit=True,
+        )
+    virt_ram = IntField(
+        default="<<inherit>>",
+        comment="(MB)",
+        inherit=True,
+        )
+    virt_auto_boot = BoolField(
+        default="<<inherit>>",
+        comment="Auto boot this VM?"
+        inherit=True,
+        )
+    power_type = ChoiceField(
+        display_name="Power Management Type",
+        default="SETTINGS:power_management_default_type",
+        choices=utils.get_power_types(),
+        )
+    power_address = StrField(
+        display_name="Power Management Address",
+        comment="Ex: power-device.example.org",
+        )
+    
 
 
 class Repo(BaseItem):
