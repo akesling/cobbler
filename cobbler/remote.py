@@ -1659,6 +1659,12 @@ class CobblerXMLRPCInterface:
                 else:
                     utils.die(self.logger, "attempt to delete in-use file")
             else:
+                import template_api.Template
+                template_obj = template_api.Template.compile(new_data)()
+                class_str = template_obj.generatedClassCode()
+                # This will throw an exception if it fails
+                utils.parse_template_class(class_str)
+                
                 fileh = open(kickstart_file,"w+")
                 fileh.write(new_data)
                 fileh.close()
