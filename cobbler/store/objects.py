@@ -51,7 +51,8 @@ class BaseField(object):
     tags = []
     
     def __init__(self, default=None, tooltip=None, display_name=None, tags=None,
-                 visible=True, editable=True, required=False, comment=""):
+                 visible=True, editable=True, required=False, comment="", 
+                 inherit=False):
         # Maybe add an inheritable attribute?  Is there any way to make it such
         # that you don't have to manually define default="<<inherit>>" every
         # time you do this?
@@ -64,6 +65,8 @@ class BaseField(object):
         self.editable = editable
         self.tags = list(tags or type(self).tags)
         self.visible = bool(visible)
+        self.inherit = inherit
+        
         self._value = None
         
         # TODO: fix validate code for requirement... at the moment it catches
@@ -102,7 +105,7 @@ class BaseField(object):
     
     def is_set(self):
         """Check if this Field has been set."""
-        if None != self._value != self.default:
+        if None != self.get():
             return True
         else:
             return False
@@ -125,7 +128,7 @@ class BaseField(object):
               CobblerValidationException.
         """
         value = self.get()
-        if value is not None and isinstance(value, self._type):
+        if self.is_set() and (isinstance(value, self._type) or (self.inherit and value == "<<inherit>>")):
             return True
         else:
             raise InvalidValue(
@@ -250,7 +253,7 @@ class ItemField(StrField):
             return False
     
     def validate(self):
-        if self.required and not 
+        if self.required and not \
                 len(store.find({'_type': self.item_type, 'name': self.get()})):
             raise InvalidItem(
                 u"The Item of the given name (%s) " \
@@ -266,6 +269,47 @@ class ItemField(StrField):
 __all__.extend((
     'BaseItem',
 ))
+
+def _attach_fields(cls, cls_name, bases, attrs):
+    # Manipulate Field attributes on subclassed Items as needed
+    
+    if '_fields' not in attrs:
+        attrs['_fields'] = []
+    # Make sure that subclassing doesn't destroy field information
+    for base in bases:
+        if hasattr(base, '_fields'):
+            attrs['_fields'].extend(base._fields)
+    for name, val in attrs.items():
+        if isinstance(val, BaseField):
+            if _log.getEffectiveLevel() <= logging.DEBUG:
+                _log.DEBUG(
+                    u"Binding FieldType (%s) to Field (%s) on ItemType (%s)"% 
+                    (val.__class__.__name__, attr, name)
+                )
+            # It's always nice to know what you're called
+            val._name = name
+            if not hasattr(val, 'display_name'): 
+                val.display_name = " ".join(
+                        map(str.capitalize, val._name.split("_")))
+            attrs['_fields'].append(name)
+            
+            # And who you're a member of
+            val._item = cls
+    
+    
+def _attach_reqs(cls, cls_name, bases, attrs):
+    if '_requirements' not in attrs:
+        attrs['_requirements'] = []
+    # Make sure that subclassing doesn't destroy or requirement information
+    for base in bases:
+        if hasattr(base, '_requirements'):
+            attrs['_requirements'].extend(base._requirements)
+    # Bind the object's name to it's requirements so that we
+    # can return clearer errors.
+    for req in attrs['_requirements']:
+        if not callable(req) and not req._item:
+            req._item = item
+
 
 class MetaItem(type):
     """Metaclass For All Item Types
@@ -293,8 +337,8 @@ class MetaItem(type):
             attrs['_log'] = logging.getLogger(LOG_PREFIX+'.Item.%s' % cls_name)
         
         
-        _attach_fields(cls, cls_name, bases, attrs)
-        _attach_reqs(cls, cls_name, bases, attrs)
+        MetaItem._attach_fields(cls, cls_name, bases, attrs)
+        MetaItem._attach_reqs(cls, cls_name, bases, attrs)
         
         # Record the type of new items so we can ask for these later
         if cls_name is not 'BaseItem':
@@ -303,48 +347,6 @@ class MetaItem(type):
         return super(MetaItem, cls).__new__(cls, cls_name, bases, attrs)
     
     
-    def _attach_fields(cls, cls_name, bases, attrs):
-        # Manipulate Field attributes on subclassed Items as needed
-        
-        if '_fields' not in attrs:
-            attrs['_fields'] = []
-        # Make sure that subclassing doesn't destroy field information
-        for base in bases:
-            if hasattr(base, '_fields'):
-                attrs['_fields'].extend(base._fields)
-        for name, val in attrs.items():
-            if isinstance(val, BaseField):
-                if _log.getEffectiveLevel() <= logging.DEBUG:
-                    _log.DEBUG(
-                        u"Binding FieldType (%s) to Field (%s) on ItemType (%s)"% 
-                        (val.__class__.__name__, attr, name)
-                    )
-                # It's always nice to know what you're called
-                val._name = name
-                if not hasattr(val, 'display_name'): 
-                    val.display_name = " ".join(
-                            map(str.capitalize, val._name.split("_")))
-                attrs['_fields'].append(name)
-                
-                # And who you're a member of
-                val._item = cls
-    
-    
-    def _attach_reqs(cls, cls_name, bases, attrs):
-        if '_requirements' not in attrs:
-            attrs['_requirements'] = []
-        # Make sure that subclassing doesn't destroy or requirement information
-        for base in bases:
-            if hasattr(base, '_requirements'):
-                attrs['_requirements'].extend(base._requirements)
-        # Bind the object's name to it's requirements so that we
-        # can return clearer errors.
-        for req in attrs['_requirements']:
-            if not callable(req) and not req._item:
-                req._item = item
-        
-
-
 class ItemIterator(object):
     #Because having __dict__ is absolutely unnecessary
     __slots__ = ['item', 'count', 'len']
@@ -450,7 +452,7 @@ class BaseItem(object):
         """
         return dict(self)
                 
-    def render(self):
+    def render(self, inheritance_path=[]):
         """By default ``render`` is a synonym for ``deflate``
         
         However, if special actions (such as Item level inheritance) are
@@ -458,6 +460,17 @@ class BaseItem(object):
         or when using Koan) then this should be overridden in the Item's
         declaration.
         """
+        # Note that the following block is in fact unnecessary when in BaseItem.
+        # But because it is required pretty much everywhere else... it is 
+        # included here for homogeneity.
+        
+        # This makes inheritance acyclic... ----------------------------------
+        # INCLUDE THIS WITH ALL INHERITANCE CODE -----------------------------
+        if self in inheritance_path:
+            return self.deflate()
+        inheritance_path.append(self)
+        # --------------------------------------------------------------------
+        
         return self.deflate()
     
     def validate(self):
@@ -623,30 +636,84 @@ __all__.extend((
 #       new Items as yet.
 
 
-class System(BaseItem):
+class Distro(BaseItem):
     _requirements = []
     
     name = StrField(required=True)
-    """Name of this distribution"""
     owners = ListField()
     
-    # XXX: If one of these is set it needs to be resolved that the other won't
-    #       inherit....
-    # XXX: Also, how will the group requirement deal with default being set
-    #       on both Fields?
-    profile = ItemField(item_type='Profile')
-    image = ItemField(item_type='Image')
-    _requirements.append(require_one_of(profile, image))
+    distro = ItemField()
+    
+    def render(self, inheritance_path=[]):
+        # This makes inheritance acyclic... ----------------------------------
+        # INCLUDE THIS WITH ALL INHERITANCE CODE -----------------------------
+        if self in inheritance_path:
+            return self.deflate()
+        inheritance_path.append(self)
+        # --------------------------------------------------------------------
+        
+        rendered = super(System, self).render(inheritance_path)
+        parent = self.profile.get_ref().render(inheritance_path)
+        for field, value in rendered:
+            if value == "<<inherit>>":
+               rendered[field] = parent[field] 
+        return rendered
+    
+    kernel = StrField(
+        comment="Absolute path to kernel on filesystem"
+        )
+    initrd = StrField(
+        comment="Absolute path to initrd on filesystem"
+        )
 
     kernel_options = DictField()
-    kernel_options_post_install = DictField(
-            display_name=u"Kernel Options (Post Install)",
+    kernel_options_post = DictField(
+        display_name=u"Kernel Options (Post Install)",
         )
     
+    architecture = ChoiceField(
+        default='i386',
+        choices=['i386','x86_64','ia64','ppc','s390'],
+        )
+    breed = ChoiceField(
+        default='redhat',
+        choices=['redhat', 'debian'],  #XXX: Needs to be loaded from config
+        comment="What is the type of distribution?",
+        )
+    os_version = ChoiceField(
+        default='generic26',
+        display_name='OS Version',
+        comment='Needed for some virtualization optimizations',
+        )
+    source_repos = ListField()
+    depth = IntField()
+    comment = StrField(
+        comment="Free form text description",
+        )
+    tree_build_time = StrField()
+    
     kickstart_metadata = DictField()
-    kickstart = StrField(default=u"<<inherit>>")
-    comment = StrField(tags=[u"TextField"])
-    netboot_enable = BoolField()
+    mgmt_classes = ListField(
+        display_name="Management Classes",
+        comment="For external config management",
+        )
+    mgmt_parameters = DictField(
+        default="<<inherit>>",
+        display_name="Management Parameters",
+        comment="Parameters which will be handed to your management application (Must be valid YAML dictionary)",
+        )
+    template_files = DictField(
+        comment="File mappings for built-in configuration management",
+        )
+    red_hat_management_key = StrField(
+        default="<<inherit>>",
+        comment="Registration key for RHN, Satellite, or Spacewalk",
+        )
+    red_hat_management_server = StrField(
+        default="<<inherit>>",
+        comment="Address of Satellite or Spacewalk Server",
+        )
+    template_remote_kickstarts = BoolField()
     
     
 class Image(BaseItem):
@@ -668,7 +735,15 @@ class System(BaseItem):
     profile = ItemField(item_type='Profile')
     image = ItemField(item_type='Image')
     _requirements.append(require_one_of(profile, image))
+    
     def render(self):
+        # This makes inheritance acyclic... ----------------------------------
+        # INCLUDE THIS WITH ALL INHERITANCE CODE -----------------------------
+        if self in inheritance_path:
+            return self.deflate()
+        inheritance_path.append(self)
+        # --------------------------------------------------------------------
+        
         rendered = super(System, self).render()
         profile = self.profile.get_ref().render()
         image = self.image.get_ref().render()
@@ -686,7 +761,7 @@ class System(BaseItem):
     
     kickstart_metadata = DictField()
     kickstart = StrField(
-        default=u"<<inherit>>"
+        default=u"<<inherit>>",
         inherit=True,
         )
     netboot_enabled = BoolField()
@@ -699,7 +774,7 @@ class System(BaseItem):
         )
     virt_path = StrField(
         default="<<inherit>>", 
-        comment="Ex: /directory or VolGroup00"
+        comment="Ex: /directory or VolGroup00",
         inherit=True,
         )
     virt_type = StrField(
@@ -723,19 +798,102 @@ class System(BaseItem):
         )
     virt_auto_boot = BoolField(
         default="<<inherit>>",
-        comment="Auto boot this VM?"
+        comment="Auto boot this VM?",
         inherit=True,
         )
     power_type = ChoiceField(
         display_name="Power Management Type",
         default="SETTINGS:power_management_default_type",
-        choices=utils.get_power_types(),
+        choices=('foo', 'bar', 'baz'),#XXX: Needs to be loaded from config
         )
     power_address = StrField(
         display_name="Power Management Address",
         comment="Ex: power-device.example.org",
         )
-    
+    power_user = StrField(
+        display_name="Power Username",
+        )
+    power_pass = StrField(
+        display_name="Power Password",
+        )
+    power_id = StrField(
+        display_name=u"Power ID",
+        comment=u"Usually a plug number or blade name, if power type requires it",
+        )
+    hostname = StrField()
+    gateway = StrField()
+    name_servers = ListField()
+    name_servers_search = ListField(
+        display_name=u"Name Servers Search Path",
+        )
+    ipv6_default_device = StrField(
+        display_name=u"IPv6 Default Device",
+        )
+    ipv6_autoconfiguration = BoolField(
+        display_name=u"IPv6 Default Device",
+        )
+    mac_address = StrField(
+        display_name=u"MAC Address",
+        comment=u"(Place \"random\" in this field for a random MAC Address.)",
+        )
+    mtu = StrField(
+        display_name=u"MTU",
+        )
+    bonding = ChoiceField(
+        display_name="Bonding Mode",
+        choices=["na","master","slave"],
+        )
+    bonding_master = StrField()
+    bonding_opts = StrField()
+    static = BoolField(
+        comment="Is this interface static?",
+        )
+    subnet = StrField()
+    dhcp_tag = StrField(
+        display_name="DHCP Tag",
+        )
+    dns_name = StrField(
+        display_name="DNS Name",
+        )
+    static_routes = ListField()
+    virt_bridge = StrField()
+    ipv6_address = StrField(
+        display_name="IPv6 Address",
+        )
+    ipv6_secondaries = ListField(
+        display_name="IPv6 Secondaries",
+        )
+    ipv6_mtu = StrField(
+        display_name="IPv6 MTU",
+        )
+    ipv6_static_routes = ListField(
+        display_name="IPv6 Static Routes",
+        )
+    ipv6_default_gateway = StrField(
+        display_name="IPv6 Default Gateway",
+        )
+    mgmt_classes = ListField(
+        display_name="Management Classes",
+        comment="For external config management",
+        )
+    mgmt_parameters = DictField(
+        default="<<inherit>>",
+        display_name="Management Parameters",
+        comment="Parameters which will be handed to your management application (Must be valid YAML dictionary)",
+        )
+    template_files = DictField(
+        comment="File mappings for built-in configuration management",
+        )
+    red_hat_management_key = StrField(
+        default="<<inherit>>",
+        comment="Registration key for RHN, Satellite, or Spacewalk",
+        )
+    red_hat_management_server = StrField(
+        default="<<inherit>>",
+        comment="Address of Satellite or Spacewalk Server",
+        )
+    template_remote_kickstarts = BoolField()
+        
 
 
 class Repo(BaseItem):
