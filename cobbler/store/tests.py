@@ -37,8 +37,37 @@ class TestItem(unittest.TestCase):
         d.initrd = fake_initrd
         self.assertTrue(d.validate())
         self.assertTrue(store.set(d))
-        self.assertEqual(store.find({'name':'Hello'}), [(d._uid.get(),)])
+        self.assertEqual(store.find({'name':'Hello', '_type':'Distro'}),
+             [(d._uid.get(),)])
         self.assertEqual(store.get(d._uid.get()).deflate(), d.deflate())
+    
+    def test_image_store(self):
+        i = store.new('Image')
+        self.assertFalse(i.validate())
+        ERRORS = dict(i._errors)
+        self.assertEqual(len(i._errors), 1)
+        self.assertTrue('name' in ERRORS)
+        i.name = 'Hello'
+        self.assertTrue(i.validate())
+        self.assertTrue(store.set(i))
+        self.assertEqual(store.find({'name':'Hello', '_type':'Image'}),
+             [(i._uid.get(),)])
+        self.assertEqual(store.get(i._uid.get()).deflate(), i.deflate())
+    
+    def test_profile_store(self):
+        i = store.new('Profile')
+        self.assertFalse(i.validate())
+        ERRORS = dict(i._errors)
+        self.assertEqual(len(i._errors), 2)
+        self.assertTrue('name' in ERRORS)
+        self.assertTrue('distro' in ERRORS)
+        i.name = 'Hello'
+        i.distro = 'Hello'
+        self.assertTrue(i.validate())
+        self.assertTrue(store.set(i))
+        self.assertEqual(store.find({'name':'Hello', '_type':'Profile'}),
+             [(i._uid.get(),)])
+        self.assertEqual(store.get(i._uid.get()).deflate(), i.deflate())
 
 if __name__ == '__main__':
     unittest.main()

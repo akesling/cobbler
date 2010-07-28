@@ -63,19 +63,22 @@ class BaseField(object):
             else:
                 self.default = self._coerce(self.default)
         
+        
+        self.required = required
+        if not default and required:
+            self.default = None
+        
+        self.inherit = inherit
+        if default == "<<inherit>>" and inherit:
+            self.default = default
+        
         self.comment = unicode(comment)
         self.editable = editable
         self.tags = list(tags or type(self).tags)
         self.visible = bool(visible)
-        self.inherit = inherit
         
         self._value = None
         
-        # TODO: fix validate code for requirement... at the moment it catches
-        #       on default being None... but it doesn't output a clean error
-        self.required = required
-        if not default and required:
-            self.default = None
     
     def __set__(self, instance, value):
         self.set(value)
@@ -103,11 +106,14 @@ class BaseField(object):
     
     def set(self, value):
         """This Field's setter"""
-        self._value = self._coerce(value)
+        if self.inherit and value == "<<inherit>>":
+            self._value = value
+        else:
+            self._value = self._coerce(value)
     
     def is_set(self):
         """Check if this Field has been set."""
-        if None != self.get():
+        if None != self._value:
             return True
         else:
             return False
@@ -130,7 +136,7 @@ class BaseField(object):
               CobblerValidationException.
         """
         value = self.get()
-        if self.is_set() and (isinstance(value, self._type) \
+        if (isinstance(value, self._type) \
                          or (self.inherit and value == "<<inherit>>")):
             return True
         else:
@@ -262,19 +268,37 @@ class ItemField(StrField):
             return False
     
     def validate(self):
-        if self.required and not \
-                len(store.find({'_type': self.item_type, 'name': self.get()})):
-            raise InvalidItem(
-                u"The Item of the given name (%s) " \
-                "and type (%s) cannot be found." %
-                (self.get(), self.item_type))
+        exists = lambda t,n: len(store.find({'_type': t, 'name': n}))
+        if (self.is_set() or self.required) and \
+                not exists(self.item_type, self.get()):
+            #print ''
+            #print self.get(), self._value, self.default, self.inherit, self.required
+            
+            if self.required and self.inherit and self.get() == "<<inherit>>":
+                #This if-case is here because rendering could be expensive
+                rendered = self._item.render()
+                if not exists(self.item_type, rendered[self._name]):
+                    raise InvalidItem(
+                    u"Field '%s' of type '%s' has been unable to properly"
+                     " inherit a valid Item. The rendered result returned" \
+                     " the name '%s' and type '%s'." %
+                    (self._name, self.__class__.__name__, rendered[self._name], 
+                    self.item_type))
+            else:
+                raise InvalidItem(
+                u"Field '%s' of type '%s' cannot find an Item" \
+                 " with the name '%s' and type '%s'." %
+                (self._name, self.__class__.__name__, self.get(), 
+                self.item_type))
                 
         return super(ItemField, self).validate()
 
 class LocalFileField(StrField):
     def validate(self):
         value = self.get()
-        if value != None and not os.access(os.path.abspath(value), os.R_OK):
+        
+        if (self.is_set() or self.required) and \
+             (value == None or not os.access(os.path.abspath(value), os.R_OK)):
             raise FileNotFound(
             u"Field '%s' of type '%s' contains a value" \
              " (%s) which does not refer to a readable file." %
@@ -312,8 +336,6 @@ def _attach_fields(cls, cls_name, bases, attrs):
                         map(str.capitalize, val._name.split("_")))
             attrs['_fields'].append(name)
             
-            # And who you're a member of
-            val._item = cls
     
     
 def _attach_reqs(cls, cls_name, bases, attrs):
@@ -409,6 +431,10 @@ class BaseItem(object):
         self._errors = []
         self._load_handler = load_handler
         self._store_handler = store_handler
+        
+        # It's always nice to know who you're a member of
+        for field in self._fields:
+            getattr(self, field)._item = self
     
     def __iter__(self):
         return ItemIterator(self)
@@ -785,7 +811,7 @@ class Image(BaseItem):
         )
     
     os_version = ChoiceField(
-        default='',
+        default='rhel4',
         choices=['rhel4', 'foo', 'bar'],  #XXX: Needs to be loaded from config
         display_name='OS Version',
         comment='ex: rhel4',
@@ -826,8 +852,6 @@ class Image(BaseItem):
 
 
 class Profile(BaseItem):
-    _requirements = []
-    
     name = StrField(required=True)
     owners = ListField()#XXX: Needs to be loaded from config
     
@@ -840,7 +864,6 @@ class Profile(BaseItem):
         default='<<inherit>>',
         item_type='Distro',
         )
-    _requirements.append(require_one_of(profile, distro))
     
     def render(self, inheritance_path=[]):
         # This makes inheritance acyclic... ----------------------------------
@@ -852,18 +875,18 @@ class Profile(BaseItem):
         
         rendered = super(Profile, self).render(inheritance_path)
         
-        if profile.is_set():
+        if self.profile.is_set():
             parent = self.profile.get_ref().render(inheritance_path)
         else:
-            parent = store.new('Profile')
+            parent = store.new('Profile').deflate()
         
-        if distro.is_set():
+        if self.distro.is_set():
             distro = self.distro.get_ref().render(inheritance_path)
             for field, value in parent:
                 if value == "<<inherit>>":
                    parent[field] = distro[field] 
         
-        for field, value in rendered:
+        for field, value in rendered.iteritems():
             if value == "<<inherit>>":
                rendered[field] = parent[field] 
         
