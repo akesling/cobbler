@@ -8,6 +8,10 @@ class CobblerValidationException(Exception):
     pass
 
 
+class FileNotFound(CobblerValidationException):
+    pass
+
+
 class InvalidRequirement(CobblerValidationException):
     pass
 

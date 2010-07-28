@@ -8,6 +8,7 @@ __all__ = []
 __docformat__ = 'restructuredtext en'
 
 import time, datetime
+import os
 
 from store_exceptions import *
 import __init__ as store
@@ -56,10 +57,11 @@ class BaseField(object):
         # Maybe add an inheritable attribute?  Is there any way to make it such
         # that you don't have to manually define default="<<inherit>>" every
         # time you do this?
-        if default:
-            self.default = self._coerce(default)
-        else:
-            self.default = self._coerce(self.default)
+        if not (default == "<<inherit>>" and inherit):
+            if default:
+                self.default = self._coerce(default)
+            else:
+                self.default = self._coerce(self.default)
         
         self.comment = unicode(comment)
         self.editable = editable
@@ -128,13 +130,19 @@ class BaseField(object):
               CobblerValidationException.
         """
         value = self.get()
-        if self.is_set() and (isinstance(value, self._type) or (self.inherit and value == "<<inherit>>")):
+        if self.is_set() and (isinstance(value, self._type) \
+                         or (self.inherit and value == "<<inherit>>")):
             return True
         else:
-            raise InvalidValue(
-                    u"Field '%s' of type '%s' does not " \
-                    u"have a valid value (%s)." %
-                    (self._name, self.__class__.__name__, self._value))
+            if self.required and self._value is None:
+                raise InvalidValue(
+                        u"Field '%s' of type '%s' is required." %
+                        (self._name, self.__class__.__name__))
+            else:
+                raise InvalidValue(
+                        u"Field '%s' of type '%s' does not " \
+                        u"have a valid value (%s)." %
+                        (self._name, self.__class__.__name__, self._value))
 
 
 ##############################################################################
@@ -224,10 +232,11 @@ class ChoiceField(StrField):
         super(ChoiceField, self).__init__(*args, **kwargs)
     
     def validate(self):
-        if self._value not in self.choices:
+        if self.get() not in self.choices:
             raise InvalidChoice(
-            u"Field of type %s contains a value not in its list of choices." %
-            self.__class__.__name__)
+            u"Field '%s' of type '%s' contains a value" \
+             " (%s) not in its list of choices." %
+            (self._name, self.__class__.__name__, self._value))
         super(ChoiceField, self).validate()
 
 
@@ -261,6 +270,16 @@ class ItemField(StrField):
                 (self.get(), self.item_type))
                 
         return super(ItemField, self).validate()
+
+class LocalFileField(StrField):
+    def validate(self):
+        value = self.get()
+        if value != None and not os.access(os.path.abspath(value), os.R_OK):
+            raise FileNotFound(
+            u"Field '%s' of type '%s' contains a value" \
+             " (%s) which does not refer to a readable file." %
+            (self._name, self.__class__.__name__, self._value))
+        return super(LocalFileField, self).validate()
         
 
 ##############################################################################
@@ -336,9 +355,11 @@ class MetaItem(type):
         if '_log' not in attrs:
             attrs['_log'] = logging.getLogger(LOG_PREFIX+'.Item.%s' % cls_name)
         
+        if '_type' not in attrs:
+            attrs['_type'] = StrField(default=cls_name, editable=False)
         
-        MetaItem._attach_fields(cls, cls_name, bases, attrs)
-        MetaItem._attach_reqs(cls, cls_name, bases, attrs)
+        _attach_fields(cls, cls_name, bases, attrs)
+        _attach_reqs(cls, cls_name, bases, attrs)
         
         # Record the type of new items so we can ask for these later
         if cls_name is not 'BaseItem':
@@ -407,8 +428,20 @@ class BaseItem(object):
         self.inflate(repr)
     
     def _store(self, handler=None):
-        if not handler:
-            self._store_handler(self)
+        if self.validate():
+            if not handler:
+                if self._store_handler(self):
+                    return True
+                else:
+                    return False
+            else:
+                if handler(self):
+                    return True
+                else:
+                    return False
+        else:
+            return False
+        
     
     def inflate(self, repr):
         """Take an object representation and use it to inflate this object
@@ -420,7 +453,7 @@ class BaseItem(object):
         code should do the coercion prior to an inflation attempt.
         """
         repr = dict(repr)
-        for key, val in repr:
+        for key, val in repr.iteritems():
             try:
                 attr = getattr(self, key)
                 if isinstance(attr, BaseField):
@@ -642,7 +675,7 @@ class Distro(BaseItem):
     name = StrField(required=True)
     owners = ListField()
     
-    distro = ItemField()
+    distro = ItemField('Distro')
     
     def render(self, inheritance_path=[]):
         # This makes inheritance acyclic... ----------------------------------
@@ -652,17 +685,19 @@ class Distro(BaseItem):
         inheritance_path.append(self)
         # --------------------------------------------------------------------
         
-        rendered = super(System, self).render(inheritance_path)
+        rendered = super(Distro, self).render(inheritance_path)
         parent = self.profile.get_ref().render(inheritance_path)
         for field, value in rendered:
             if value == "<<inherit>>":
                rendered[field] = parent[field] 
         return rendered
     
-    kernel = StrField(
+    kernel = LocalFileField(
+        required=True,
         comment="Absolute path to kernel on filesystem"
         )
-    initrd = StrField(
+    initrd = LocalFileField(
+        required=True,
         comment="Absolute path to initrd on filesystem"
         )
 
@@ -682,6 +717,7 @@ class Distro(BaseItem):
         )
     os_version = ChoiceField(
         default='generic26',
+        choices=['generic26', 'foo', 'bar'],  #XXX: Needs to be loaded from config
         display_name='OS Version',
         comment='Needed for some virtualization optimizations',
         )
@@ -698,6 +734,7 @@ class Distro(BaseItem):
         comment="For external config management",
         )
     mgmt_parameters = DictField(
+        inherit=True,
         default="<<inherit>>",
         display_name="Management Parameters",
         comment="Parameters which will be handed to your management application (Must be valid YAML dictionary)",
@@ -706,10 +743,12 @@ class Distro(BaseItem):
         comment="File mappings for built-in configuration management",
         )
     red_hat_management_key = StrField(
+        inherit=True,
         default="<<inherit>>",
         comment="Registration key for RHN, Satellite, or Spacewalk",
         )
     red_hat_management_server = StrField(
+        inherit=True,
         default="<<inherit>>",
         comment="Address of Satellite or Spacewalk Server",
         )
@@ -717,11 +756,235 @@ class Distro(BaseItem):
     
     
 class Image(BaseItem):
-    pass
+    name = StrField(required=True)
+    owners = ListField()
+    
+    architecture = ChoiceField(
+        default='i386',
+        choices=['i386','x86_64','ia64','ppc','s390'],
+        )
+    breed = ChoiceField(
+        default='redhat',
+        choices=['redhat', 'debian'],  #XXX: Needs to be loaded from config
+        comment="What is the type of distribution?",
+        )
+    comment = StrField(
+        comment="Free form text description",
+        )
+    file = LocalFileField(
+        comment="Path to local file or nfs://user@host:path",
+        )
+    depth = IntField()
+    image_type = ChoiceField(
+        default='iso',
+        choices=['iso', 'direct', 'virt-image'],
+        )
+    network_count = IntField(
+        default=1,
+        display_name='Virt NICs',
+        )
+    
+    os_version = ChoiceField(
+        default='',
+        choices=['rhel4', 'foo', 'bar'],  #XXX: Needs to be loaded from config
+        display_name='OS Version',
+        comment='ex: rhel4',
+        )
+    
+    kickstart = LocalFileField(
+        comment="Path to kickstart/answer file template",
+        )
+    virt_auto_boot = BoolField(
+        default = 0, #XXX: Needs to be loaded from config
+        comment="Auto boot this VM?",
+        )
+    virt_bridge = StrField(
+        default="SETTINGS:default_virt_bridge", #XXX: Needs to be loaded from config
+        )
+    virt_path = StrField(
+        inherit=True,
+        default="<<inherit>>", 
+        comment="Ex: /directory or VolGroup00",
+        )
+    virt_type = StrField(
+        inherit=True,
+        default="<<inherit>>",
+        comment="Virtualization technology to use",
+        )
+    virt_cpus = IntField(
+        default=1, 
+        )
+    virt_file_size = FloatField(
+        default=1, #XXX: Needs to be loaded from config
+        comment="(GB)",
+        )
+    virt_ram = IntField(
+        display_name="Virt RAM",
+        default=200, #XXX: Needs to be loaded from config
+        comment="(MB)",
+        )
 
 
 class Profile(BaseItem):
-    pass
+    _requirements = []
+    
+    name = StrField(required=True)
+    owners = ListField()#XXX: Needs to be loaded from config
+    
+    # XXX: Also, how will the group requirement deal with default being set
+    #       on both Fields?
+    profile = ItemField(item_type='Profile')
+    distro = ItemField(
+        required=True,
+        inherit=True,
+        default='<<inherit>>',
+        item_type='Distro',
+        )
+    _requirements.append(require_one_of(profile, distro))
+    
+    def render(self, inheritance_path=[]):
+        # This makes inheritance acyclic... ----------------------------------
+        # INCLUDE THIS WITH ALL INHERITANCE CODE -----------------------------
+        if self in inheritance_path:
+            return self.deflate()
+        inheritance_path.append(self)
+        # --------------------------------------------------------------------
+        
+        rendered = super(Profile, self).render(inheritance_path)
+        
+        if profile.is_set():
+            parent = self.profile.get_ref().render(inheritance_path)
+        else:
+            parent = store.new('Profile')
+        
+        if distro.is_set():
+            distro = self.distro.get_ref().render(inheritance_path)
+            for field, value in parent:
+                if value == "<<inherit>>":
+                   parent[field] = distro[field] 
+        
+        for field, value in rendered:
+            if value == "<<inherit>>":
+               rendered[field] = parent[field] 
+        
+        return rendered
+    comment = StrField(
+        tags=['TextField'],
+        )
+   
+    enable_menu = BoolField(
+        inherit=True,
+        default="<<inherit>>", #XXX: Needs to be loaded from config
+        display_name="Enable PXE Menu?",
+        comment="Show this profile in PXE menu?",
+        )
+    
+    kernel_options = DictField(
+        inherit=True,
+        default="<<inherit>>",
+        comment="Ex: selinux=permissive",
+        )
+    kernel_options_post = DictField(
+        inherit=True,
+        default="<<inherit>>",
+        display_name=u"Kernel Options (Post Install)",
+        )
+    
+    kickstart_metadata = DictField(
+        inherit=True,
+        default="<<inherit>>",
+        comment="Ex: dog=fang agent=86",
+        )
+    kickstart = LocalFileField(
+        inherit=True,
+        default=u"<<inherit>>",#XXX: Needs to be loaded from config
+        )
+    netboot_enabled = BoolField()
+    comment = StrField(tags=[u"TextField"])
+    depth = IntField(
+        default=1,
+        )
+    server_override = StrField(
+        inherit=True,
+        default="<<inherit>>",
+        comment="See manpage or leave blank",
+        )
+    virt_path = StrField(
+        inherit=True,
+        default="<<inherit>>", 
+        comment="Ex: /directory or VolGroup00",
+        )
+    virt_type = StrField(
+        inherit=True,
+        default="<<inherit>>",
+        comment="Virtualization technology to use",
+        )
+    virt_cpus = IntField(
+        inherit=True,
+        default="<<inherit>>", 
+        )
+    virt_file_size = FloatField(
+        inherit=True,
+        default="<<inherit>>",#XXX: Needs to be loaded from config
+        comment="(GB)",
+        )
+    virt_ram = IntField(
+        inherit=True,
+        default="<<inherit>>",#XXX: Needs to be loaded from config
+        comment="(MB)",
+        )
+    virt_auto_boot = BoolField(
+        inherit=True,
+        default="<<inherit>>",
+        comment="Auto boot this VM?",
+        )
+    virt_bridge = StrField(
+        default="SETTINGS:default_virt_bridge", #XXX: Needs to be loaded from config
+        inherit=True,
+        )
+    repos = ListField(
+        inherit=True,
+        default="<<inherit>>",
+        comment="Repos to auto-assign to this profile",
+        )
+    dhcp_tag = StrField(
+        display_name="DHCP Tag",
+        )
+    name_servers = ListField(
+        default=['foo'],#XXX: Needs to be loaded from config
+        )
+    name_servers_search = ListField(
+        default=['foo'],#XXX: Needs to be loaded from config
+        display_name=u"Name Servers Search Path",
+        )
+    mgmt_classes = ListField(
+        inherit=True,
+        default="<<inherit>>",
+        display_name="Management Classes",
+        comment="For external config management",
+        )
+    mgmt_parameters = DictField(
+        inherit=True,
+        default="<<inherit>>",
+        display_name="Management Parameters",
+        comment="Parameters which will be handed to your management application (Must be valid YAML dictionary)",
+        )
+    template_files = DictField(
+        inherit=True,
+        default="<<inherit>>",
+        comment="File mappings for built-in configuration management",
+        )
+    red_hat_management_key = StrField(
+        inherit=True,
+        default="<<inherit>>",
+        comment="Registration key for RHN, Satellite, or Spacewalk",
+        )
+    red_hat_management_server = StrField(
+        inherit=True,
+        default="<<inherit>>",
+        comment="Address of Satellite or Spacewalk Server",
+        )
+    template_remote_kickstarts = BoolField()
 
 
 class System(BaseItem):
@@ -736,7 +999,7 @@ class System(BaseItem):
     image = ItemField(item_type='Image')
     _requirements.append(require_one_of(profile, image))
     
-    def render(self):
+    def render(self, inheritance_path=[]):
         # This makes inheritance acyclic... ----------------------------------
         # INCLUDE THIS WITH ALL INHERITANCE CODE -----------------------------
         if self in inheritance_path:
@@ -744,9 +1007,9 @@ class System(BaseItem):
         inheritance_path.append(self)
         # --------------------------------------------------------------------
         
-        rendered = super(System, self).render()
-        profile = self.profile.get_ref().render()
-        image = self.image.get_ref().render()
+        rendered = super(Profile, self).render(inheritance_path)
+        profile = self.profile.get_ref().render(inheritance_path)
+        image = self.image.get_ref().render(inheritance_path)
         # Since only one of the two should be non-False.
         parent = profile or image
         for field, value in rendered:
@@ -761,45 +1024,45 @@ class System(BaseItem):
     
     kickstart_metadata = DictField()
     kickstart = StrField(
-        default=u"<<inherit>>",
         inherit=True,
+        default=u"<<inherit>>",
         )
     netboot_enabled = BoolField()
     comment = StrField(tags=[u"TextField"])
     depth = IntField()
     server_override = StrField(
+        inherit=True,
         default="<<inherit>>",
         comment="See manpage or leave blank",
-        inherit=True,
         )
     virt_path = StrField(
+        inherit=True,
         default="<<inherit>>", 
         comment="Ex: /directory or VolGroup00",
-        inherit=True,
         )
     virt_type = StrField(
+        inherit=True,
         default="<<inherit>>",
         comment="Virtualization technology to use",
-        inherit=True,
         )
     virt_cpus = IntField(
-        default="<<inherit>>", 
         inherit=True,
+        default="<<inherit>>", 
         )
     virt_file_size = FloatField(
+        inherit=True,
         default="<<inherit>>",
         comment="(GB)",
-        inherit=True,
         )
     virt_ram = IntField(
+        inherit=True,
         default="<<inherit>>",
         comment="(MB)",
-        inherit=True,
         )
     virt_auto_boot = BoolField(
+        inherit=True,
         default="<<inherit>>",
         comment="Auto boot this VM?",
-        inherit=True,
         )
     power_type = ChoiceField(
         display_name="Power Management Type",
@@ -877,6 +1140,7 @@ class System(BaseItem):
         comment="For external config management",
         )
     mgmt_parameters = DictField(
+        inherit=True,
         default="<<inherit>>",
         display_name="Management Parameters",
         comment="Parameters which will be handed to your management application (Must be valid YAML dictionary)",
@@ -885,10 +1149,12 @@ class System(BaseItem):
         comment="File mappings for built-in configuration management",
         )
     red_hat_management_key = StrField(
+        inherit=True,
         default="<<inherit>>",
         comment="Registration key for RHN, Satellite, or Spacewalk",
         )
     red_hat_management_server = StrField(
+        inherit=True,
         default="<<inherit>>",
         comment="Address of Satellite or Spacewalk Server",
         )
@@ -897,4 +1163,42 @@ class System(BaseItem):
 
 
 class Repo(BaseItem):
-    pass
+    name = StrField(required=True)
+    owners = ListField()
+    
+    architecture = ChoiceField(
+        default='i386',
+        choices=['i386','x86_64','ia64','ppc','s390'],
+        )
+    breed = ChoiceField(
+        default='redhat',
+        choices=['redhat', 'debian'],  #XXX: Needs to be loaded from config
+        comment="What is the type of distribution?",
+        )
+    comment = StrField(
+        tags=['TextField'],
+        comment="Free form text description",
+        )
+    keep_updated = BoolField(
+        default=True,
+        comment="Update this repo on next 'cobbler reposync'?",
+        )
+    mirror = StrField(
+        comment="Address of yum or rsync repo to mirror",
+        )
+    createrepo_flags = DictField(
+        comment="Flags to use with createrepo",
+        )
+    environment = DictField(
+        comment="Use these environment variables during commans (key=value, space delimited)",
+        )
+    mirror_locally = BoolField(
+        comment="Copy files or just reference the mirror internally?",
+        )
+    priority = IntField(
+        default=99,
+        comment="Value for yum priorities plugin, if installed",
+        )
+    yum_options = DictField(
+        comment="Options to write to yum config file",
+        )

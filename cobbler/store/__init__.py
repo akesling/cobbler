@@ -183,9 +183,8 @@ def new(item_type, source='base'):
         item._ctime.set(ctime)
         item._mtime.set(ctime)
         # Make the object store aware there is a new unstored Item
-        handlers.base_register_handler(item._uid)
+        handlers.base_register_handler(item._uid.get())
         return item 
     else:
         raise objects.TypeNotFound(
             "The object type %s is not presently defined." % obj_type)
-

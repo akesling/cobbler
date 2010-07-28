@@ -53,7 +53,7 @@ def base_find_handler(criteria, slice=['_uid']):
 
 def base_load_handler(uid):
     try:
-        return _items[uid]
+        return _items[uid].deflate()
     except KeyError:
         raise ItemNotFound(
             "The Item you have requested with uid %s does not exist." % uid)
