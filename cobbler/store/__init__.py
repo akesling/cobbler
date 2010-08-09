@@ -101,7 +101,7 @@ def get_types():
         and the second item is the Type's signature as a dictionary.
     """
     # TODO: Allow getting of types other than base types
-    return objects._item_types
+    return objects._item_types.keys()
 
 
 def set(item):
@@ -174,7 +174,7 @@ def new(item_type, source='base'):
         raise InvalidSource()
     
     if item_type in get_types():
-        item = getattr(objects, item_type)(
+        item = objects._item_types[item_type](
             load_handler=handlers.base_load_handler,
             store_handler=handlers.base_store_handler,
         )

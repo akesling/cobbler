@@ -17,8 +17,8 @@ import logging
 LOG_PREFIX = 'store.objects'
 _log = logging.getLogger(LOG_PREFIX)
 
-# A list which records all item types created
-_item_types = []
+# A dict which records a mapping of all item types created as {name:type,...}
+_item_types = {}
 
 # TODO: Implement Field value inheritance.  This will likely be done through 
 #       The declaration of a _parents Field on the child, and "<<inherit>>"
@@ -43,10 +43,47 @@ class BaseField(object):
     They may be augmented with advanced functionality (such as references
     to Items) but at their most basic level represent standard serializable 
     types.
+    
+    The BaseField should *never* be instantiated and all Field types **must**
+    be attributes of an Item, but if you were to instantiate it, it would look 
+    something like::
+        
+        >>> import objects
+        >>> foo = objects.BaseField()
+    
+    The BaseField's default coercion is pass-through::
+        
+        >>> foo._coerce('bar')
+        'bar'
+    
+    And its base type is None::
+        
+        >>> foo._type
+        <type 'NoneType'>
+    
+    None is not a valid return value, so if this is not overriden, then the
+    given Field will never properly validate.  At this point, it should also
+    be noted that validate may not be called when a Field is not properly 
+    bound to an Item::
+    
+        >>> foo.validate()
+        Traceback (most recent call last):
+            ...
+        AttributeError: 'BaseField' object has no attribute '_name'
+    
+    To set values on a field, the ``set`` method is used::
+    
+        >>> foo.set('bar')
+        
+    And to get values, the ``get`` method is used::
+    
+        >>> foo.get()
+        'bar'
+    
     """
     __metaclass__ = MetaField
     
-    _coerce = lambda x:x
+    _coerce = staticmethod(lambda x:x)
     _type = type(None)
     default = None
     tags = []
@@ -112,7 +149,19 @@ class BaseField(object):
             self._value = self._coerce(value)
     
     def is_set(self):
-        """Check if this Field has been set."""
+        """Check if this Field has been set
+            
+        *Example*::
+        
+            >>> import objects
+            >>> foo = objects.BaseField()
+            >>> foo.is_set()
+            False
+            >>> foo.set('bar')
+            >>> foo.is_set()
+            True
+        
+        """
         if None != self._value:
             return True
         else:
@@ -123,11 +172,31 @@ class BaseField(object):
         This method verifies that the value returned by ``get()`` is not 
         None and that it is of the type defined by ``self._type``.
         
-        ``validate`` may be called directly, but is mainly called when 
-        validating an Item.  You can (and should) validate all Items you 
-        are working on whenever you need to check validity, but be aware
-        that this routine is also called when trying to save an Item back
-        to the object store.
+        ``validate`` should only ever be called on a Field which is properly
+        bound to an Item.
+            
+            >>> import objects, store
+            >>> class Foo(objects.BaseItem):
+            ...     bar = objects.StrField()
+            ...     baz = objects.IntField()
+            ...
+            >>> foo = store.new('Foo')
+        
+        It may be called directly, 
+            
+            >>> foo.bar.validate()
+            True
+            >>> foo.baz.validate()
+            True
+        
+        but is mainly called when validating an Item.  
+        
+            >>> foo.validate()
+            True
+        
+        You can (and should) validate all Items you are working on whenever 
+        you need to check validity, but be aware that this routine is also 
+        called when trying to save an Item back to the object store.
         
         Expected results from calling ``validate``:
             * If the field is valid, ``validate`` returns a True value.
@@ -136,7 +205,7 @@ class BaseField(object):
               CobblerValidationException.
         """
         value = self.get()
-        if (isinstance(value, self._type) \
+        if ((isinstance(value, self._type) and value is not None) \
                          or (self.inherit and value == "<<inherit>>")):
             return True
         else:
@@ -257,7 +326,7 @@ class ItemField(StrField):
      
         *Return Value:*
             If this field represents a valid Item, then it returns that Item.
-            
+                       
             Else it returns False
         """
 
@@ -383,11 +452,12 @@ class MetaItem(type):
         _attach_fields(cls, cls_name, bases, attrs)
         _attach_reqs(cls, cls_name, bases, attrs)
         
+        new_type = super(MetaItem, cls).__new__(cls, cls_name, bases, attrs)
+        
         # Record the type of new items so we can ask for these later
         if cls_name is not 'BaseItem':
-            _item_types.append(cls_name)
-        
-        return super(MetaItem, cls).__new__(cls, cls_name, bases, attrs)
+            _item_types[cls_name] = new_type
+        return new_type
     
     
 class ItemIterator(object):
