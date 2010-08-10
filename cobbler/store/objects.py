@@ -167,6 +167,18 @@ class BaseField(object):
         else:
             return False
     
+    def signature(self):
+        sig = (
+                        (u"class",      unicode(self.__class__.__name__)),
+                        (u"default",    unicode(self.default)   ),
+                        (u"visible",    unicode(self.visible)   ),
+                        (u"inherit",    unicode(self.inherit)   ),
+                        (u"required",   unicode(self.required)  ),
+                        (u"editable",   unicode(self.editable)  ),
+                    )
+        
+        return sig
+    
     def validate(self):
         """The most basic Field validation method
         This method verifies that the value returned by ``get()`` is not 
@@ -175,34 +187,68 @@ class BaseField(object):
         ``validate`` should only ever be called on a Field which is properly
         bound to an Item.
             
-            >>> import objects, store
+            >>> import objects, __init__ as store
             >>> class Foo(objects.BaseItem):
             ...     bar = objects.StrField()
             ...     baz = objects.IntField()
             ...
             >>> foo = store.new('Foo')
         
-        It may be called directly, 
+        It may be called directly, but is mainly called when validating an Item.  
             
-            >>> foo.bar.validate()
-            True
-            >>> foo.baz.validate()
-            True
-        
-        but is mainly called when validating an Item.  
-        
-            >>> foo.validate()
-            True
-        
         You can (and should) validate all Items you are working on whenever 
         you need to check validity, but be aware that this routine is also 
         called when trying to save an Item back to the object store.
         
         Expected results from calling ``validate``:
             * If the field is valid, ``validate`` returns a True value.
+              
+              >>> foo.bar.set('Hello validation!')
+              >>> foo.bar.validate()
+              True
+              >>> foo.baz.set(1337)
+              >>> foo.baz.validate()
+              True
+              
+              >>> foo.validate()
+              True
+            
             * If the field is invalid, ``validate`` will ``raise`` an 
               appropriate Exception which subclasses
               CobblerValidationException.
+               
+              >>> foo.bar.set(13)
+              >>> foo.bar.validate()
+              True
+              
+              Now, shouldn't that last example have thrown an exception?  
+              Well, you have to remember that values passed in through 
+              ``set`` are coerced using the Field's ``_coerce`` method, which
+              means that in this case the integer ``13`` was cast to a string 
+              ``'13'``.
+              
+              >>> foo.bar.get()
+              u'13'
+              
+              >>> foo.baz.set('103')
+              >>> foo.baz.get()
+              103
+              
+              Also note that the value returned from the StrField is a Unicode 
+              string. Wherever possible, the Object Store tries to store all 
+              strings as ``unicode`` objects so as to prevent any string 
+              encoding issues.
+              
+              Because the Field's value is coerced, if ``_coerce`` fails, you
+              should notice.  For example, the IntField uses ``int`` for 
+              coercion, so if you hand in a non-coercible string it will 
+              complain in just the same way as if you called ``int('foo')``.
+              
+              >>> foo.baz.set('foo')
+              Traceback (most recent call last):
+                  ...
+              ValueError: invalid literal for int() with base 10: 'foo'
+              
         """
         value = self.get()
         if ((isinstance(value, self._type) and value is not None) \
@@ -326,7 +372,7 @@ class ItemField(StrField):
      
         *Return Value:*
             If this field represents a valid Item, then it returns that Item.
-                       
+            
             Else it returns False
         """
 
@@ -410,7 +456,7 @@ def _attach_fields(cls, cls_name, bases, attrs):
 def _attach_reqs(cls, cls_name, bases, attrs):
     if '_requirements' not in attrs:
         attrs['_requirements'] = []
-    # Make sure that subclassing doesn't destroy or requirement information
+    # Make sure that subclassing doesn't destroy any requirement information
     for base in bases:
         if hasattr(base, '_requirements'):
             attrs['_requirements'].extend(base._requirements)
@@ -481,10 +527,34 @@ class ItemIterator(object):
 class BaseItem(object):
     """The Most Basic Item Class (From Which All Are Derived)
     
+        BaseItem represents the root parent for all Item classes.  It should
+        not be instantiated itself, and has an absolute minimum of member 
+        Fields.
+
+        When creating a new Item, subclass the BaseItem class and be sure to
+        incorporate your desired Fields as so::
+        
+            >>> import objects
+            >>> class Pizza(objects.BaseItem):
+            ...     toppings = objects.ListField()
+            ...     sauce = objects.ChoiceField(
+            ...         choices=('None', 'Tomato', 'Basil Pesto', 'White'))
+            ...     cheese = objects.BoolField(default=True)
+            ...     size = objects.IntField(
+            ...         required=True, comment=u"Diameter in inches.")
+            ...
+       
+        There are many different default Field types provided, be sure to look 
+        at the Field documentation when figuring out what best fits your 
+        needs.
+        
+        *Attributes of Note*:
+        
         * ``_requirements`` is a list of meta-requirements associated with the 
           given item.  Things which find their way here are generic enough
-          problems that they have they own specification method outside of
+          problems that their have they own specification method outside of
           either an Item's or its Fields' validation methods.
+        
     """
     __metaclass__ = MetaItem
     _requirements = []
@@ -541,9 +611,11 @@ class BaseItem(object):
     
     def inflate(self, repr):
         """Take an object representation and use it to inflate this object
+
+        *Arguments:*
         
-            * ``repr`` must be coercible into a functional python 
-              dictionary.
+            ``repr`` must be coercible into a functional python 
+                dictionary.
             
         If a different format than a python dict is available, the handling 
         code should do the coercion prior to an inflation attempt.
@@ -580,6 +652,14 @@ class BaseItem(object):
         as taking the deflated dict and munging that how it desires).
         """
         return dict(self)
+    
+    def signature(self):
+        """Return a representation of the Item's fundamental properties.
+        """
+        sig = []
+        for fld_name in self._fields:
+            sig.append((fld_name, getattr(self, fld_name).signature()))
+        return tuple(sig)
                 
     def render(self, inheritance_path=[]):
         """By default ``render`` is a synonym for ``deflate``
