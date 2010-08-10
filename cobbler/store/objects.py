@@ -11,7 +11,18 @@ import time, datetime
 import os
 
 from store_exceptions import *
-import __init__ as store
+
+# This is used for making the declarative style of Field attachment
+# function on a per instance basis... without the copy in BaseItem's
+# constructor, all Items of a given type share their Fields as class
+# variables
+import copy
+
+# XXX: Mini hack that should be removed when placed in production...
+#       only here because it is desirable to preserve relative paths
+import sys
+sys.path.insert(0, '..')
+import store
 
 import logging
 LOG_PREFIX = 'store.objects'
@@ -85,12 +96,14 @@ class BaseField(object):
     
     _coerce = staticmethod(lambda x:x)
     _type = type(None)
+    
     default = None
     tags = []
     
     def __init__(self, default=None, tooltip=None, display_name=None, tags=None,
                  visible=True, editable=True, required=False, comment="", 
                  inherit=False):
+        
         # Maybe add an inheritable attribute?  Is there any way to make it such
         # that you don't have to manually define default="<<inherit>>" every
         # time you do this?
@@ -117,12 +130,12 @@ class BaseField(object):
         self._value = None
         
     
-    def __set__(self, instance, value):
-        self.set(value)
-    
-    def __delete__(self, instance):
-        self._fields.remove(self._name)
-        super(BaseField, self).__delete__(self, instance)
+#    def __set__(self, instance, value):
+#        self.set(value)
+#    
+#    def __delete__(self, instance):
+#        self._fields.remove(self._name)
+#        super(BaseField, self).__delete__(self, instance)
     
     def __unicode__(self):
         return unicode(self._value)
@@ -133,6 +146,15 @@ class BaseField(object):
     def __repr__(self):
         return u"<class '%s': default='%s' >" % \
             (self.__class__.__name__, unicode(self.default))
+
+    def __deepcopy__(self, memo):
+        # This concept for speeding up deepcopy was pulled from Django's
+        # Forms API, specifically Field.__deepcopy__
+        
+        result = copy.copy(self)
+        memo[id(self)] = result
+        result._value = copy.deepcopy(self._value, memo)
+        return result
     
     def get(self):
         """This Field's getter"""
@@ -524,6 +546,7 @@ class ItemIterator(object):
         return name, value
 
 
+field_memo = {}
 class BaseItem(object):
     """The Most Basic Item Class (From Which All Are Derived)
     
@@ -572,8 +595,16 @@ class BaseItem(object):
         self._load_handler = load_handler
         self._store_handler = store_handler
         
-        # It's always nice to know who you're a member of
+        global field_memo
+        
         for field in self._fields:
+            # It's useful to have each Item instance with its
+            # own members... the declarative style used to define
+            # an Item leaves that Item with class variables, which
+            # in this case is bad because all Fields would be shared.
+            setattr(self, field, copy.deepcopy(getattr(type(self), field),))
+            
+            # It's also always nice to know who you're a member of
             getattr(self, field)._item = self
     
     def __iter__(self):

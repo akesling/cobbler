@@ -53,3 +53,6 @@ class InvalidSource(CobblerHandlerException):
 
 class ItemNotFound(CobblerHandlerException):
     pass
+
+class TypeNotFound(CobblerHandlerException):
+    pass

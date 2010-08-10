@@ -32,6 +32,8 @@ __all__ = (
     'new',
 )
 
+default_source = 'base'
+
 
 ##############################################################################
 ### Helper Functions #########################################################
@@ -64,7 +66,7 @@ def _create_uid(ctime=None):
 ### Object Store "Public" Interface ##########################################
 
 
-def get(uid, source='base'):
+def get(uid, source=None):
     """Get the Item represented by the provided UID
     
     *Arguments:*
@@ -79,13 +81,16 @@ def get(uid, source='base'):
     *Return Value:*
         An Item object.
     """
+    global default_source
+    if not source: source = default_source
     if source not in handlers.types:
-        raise InvalidSource()
+        raise InvalidSource(
+            "The object source of '%s' is not provided." % source)
     
-    repr = getattr(handlers, source+'_load_handler')(uid)
+    repr = getattr(handlers, source+'_load')(uid)
     obj = getattr(objects, repr['_type'])(
-            load_handler=handlers.base_load_handler,
-            store_handler=handlers.base_store_handler,
+            load_handler=getattr(handlers, source+'_load'),
+            store_handler=getattr(handlers, source+'_store'),
         )
     # TODO: This should handle logging Field setter exceptions when inflation
     #       of a field fails.
@@ -126,7 +131,7 @@ def set(item):
         return False
 
 
-def find(criteria, slice=["_uid"], source='base'):
+def find(criteria, slice=["_uid"], source=None):
     """Find items matching the given criteria
     
     *Arguments:*
@@ -147,14 +152,16 @@ def find(criteria, slice=["_uid"], source='base'):
         first property in the tuples returned will always be that 
         Item's ``_uid``.
     """
+    global default_source
+    if not source: source = default_source
     if source not in handlers.types:
         raise InvalidSource(
             "The object source of '%s' is not provided." % source)
     
-    return getattr(handlers, source+'_find_handler')(criteria, slice)
+    return getattr(handlers, source+'_find')(criteria, slice)
 
 
-def new(item_type, source='base'):
+def new(item_type, source=None):
     """Request a blank Item of the provided type
     
     *Arguments:*
@@ -170,21 +177,25 @@ def new(item_type, source='base'):
         A blank Item with the default handlers bound to it and populated 
         with its own UID, Creation Time, and Modification Time.
     """
+    global default_source
+    if not source: source = default_source
     if source not in handlers.types:
-        raise InvalidSource()
+        raise InvalidSource(
+            "The object source of '%s' is not provided." % source)
+    
     
     if item_type in get_types():
         item = objects._item_types[item_type](
-            load_handler=handlers.base_load_handler,
-            store_handler=handlers.base_store_handler,
+            load_handler=getattr(handlers, source+'_load'),
+            store_handler=getattr(handlers, source+'_store'),
         )
         ctime = time.time()
         item._uid.set(_create_uid(ctime))
         item._ctime.set(ctime)
         item._mtime.set(ctime)
         # Make the object store aware there is a new unstored Item
-        handlers.base_register_handler(item._uid.get())
+        getattr(handlers, source+'_register')(item._uid.get())
         return item 
     else:
-        raise objects.TypeNotFound(
-            "The object type %s is not presently defined." % obj_type)
+        raise TypeNotFound(
+            "The object type %s is not presently defined." % item_type)

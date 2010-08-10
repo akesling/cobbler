@@ -4,6 +4,9 @@ import os
 sys.path.insert(0, os.path.abspath('..'))
 import store
 
+#Because we want everything to use the testing handlers...
+store.default_source = 'test'
+
 class TestItem(unittest.TestCase):
 #    def test_find(self):
 #        d = store.new('Distro')
@@ -13,6 +16,8 @@ class TestItem(unittest.TestCase):
 #                print i
 #        store.set(d)
 #        print store.find({'name':'Hello'})
+    def tearDown(self):
+        store.handlers.test_flush()
     
     def test_distro_store(self):
         # Make our fake files so that the LocalFileFields will be happy
@@ -32,9 +37,9 @@ class TestItem(unittest.TestCase):
         self.assertTrue('kernel' in ERRORS)
         self.assertTrue('initrd' in ERRORS)
         self.assertTrue('name' in ERRORS)
-        d.name = 'Hello'
-        d.kernel = fake_kernel
-        d.initrd = fake_initrd
+        d.name.set('Hello')
+        d.kernel.set(fake_kernel)
+        d.initrd.set(fake_initrd)
         self.assertTrue(d.validate())
         self.assertTrue(store.set(d))
         self.assertEqual(store.find({'name':'Hello', '_type':'Distro'}),
@@ -47,7 +52,7 @@ class TestItem(unittest.TestCase):
         ERRORS = dict(i._errors)
         self.assertEqual(len(i._errors), 1)
         self.assertTrue('name' in ERRORS)
-        i.name = 'Hello'
+        i.name.set('Hello')
         self.assertTrue(i.validate())
         self.assertTrue(store.set(i))
         self.assertEqual(store.find({'name':'Hello', '_type':'Image'}),
@@ -55,19 +60,25 @@ class TestItem(unittest.TestCase):
         self.assertEqual(store.get(i._uid.get()).deflate(), i.deflate())
     
     def test_profile_store(self):
+        self.test_distro_store()
         i = store.new('Profile')
         self.assertFalse(i.validate())
         ERRORS = dict(i._errors)
         self.assertEqual(len(i._errors), 2)
         self.assertTrue('name' in ERRORS)
         self.assertTrue('distro' in ERRORS)
-        i.name = 'Hello'
-        i.distro = 'Hello'
+        i.name.set('Hello')
+        i.distro.set('Hello')
         self.assertTrue(i.validate())
         self.assertTrue(store.set(i))
         self.assertEqual(store.find({'name':'Hello', '_type':'Profile'}),
              [(i._uid.get(),)])
         self.assertEqual(store.get(i._uid.get()).deflate(), i.deflate())
+
+class TestFields(unittest.TestCase):
+    def test_str_field(self):
+        pass
+        
 
 if __name__ == '__main__':
     unittest.main()
