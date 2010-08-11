@@ -1,8 +1,8 @@
 import unittest
+import doctest
 import sys
 import os
-sys.path.insert(0, os.path.abspath('..'))
-import store
+import __init__ as store
 
 #Because we want everything to use the testing handlers...
 store.default_source = 'test'

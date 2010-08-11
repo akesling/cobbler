@@ -18,11 +18,7 @@ from store_exceptions import *
 # variables
 import copy
 
-# XXX: Mini hack that should be removed when placed in production...
-#       only here because it is desirable to preserve relative paths
-import sys
-sys.path.insert(0, '..')
-import store
+import __init__ as store
 
 import logging
 LOG_PREFIX = 'store.objects'
@@ -143,9 +139,9 @@ class BaseField(object):
     def __str__(self):
         return unicode(self)
     
-    def __repr__(self):
-        return u"<class '%s': default='%s' >" % \
-            (self.__class__.__name__, unicode(self.default))
+#    def __repr__(self):
+#        return u"<class '%s': default='%s' >" % \
+#            (self.__class__.__name__, unicode(self.default))
 
     def __deepcopy__(self, memo):
         # This concept for speeding up deepcopy was pulled from Django's
@@ -189,7 +185,7 @@ class BaseField(object):
         else:
             return False
     
-    def signature(self):
+    def get_signature(self):
         sig = (
                         (u"class",      unicode(self.__class__.__name__)),
                         (u"default",    unicode(self.default)   ),
@@ -209,7 +205,12 @@ class BaseField(object):
         ``validate`` should only ever be called on a Field which is properly
         bound to an Item.
             
-            >>> import objects, __init__ as store
+            >>> import objects
+            ... import __init__ as store # Store is imported this way
+            ...                          # only because we are sitting inside
+            ...                          # of store to do doctest. Otherwise
+            ...                          # it should be "import cobbler.store"
+            ...
             >>> class Foo(objects.BaseItem):
             ...     bar = objects.StrField()
             ...     baz = objects.IntField()
@@ -575,7 +576,7 @@ class BaseItem(object):
         
         * ``_requirements`` is a list of meta-requirements associated with the 
           given item.  Things which find their way here are generic enough
-          problems that their have they own specification method outside of
+          problems that they have their own specification method outside of
           either an Item's or its Fields' validation methods.
         
     """
@@ -684,12 +685,12 @@ class BaseItem(object):
         """
         return dict(self)
     
-    def signature(self):
+    def get_signature(self):
         """Return a representation of the Item's fundamental properties.
         """
         sig = []
         for fld_name in self._fields:
-            sig.append((fld_name, getattr(self, fld_name).signature()))
+            sig.append((fld_name, getattr(self, fld_name).get_signature()))
         return tuple(sig)
                 
     def render(self, inheritance_path=[]):
@@ -772,9 +773,12 @@ class GroupRequirement(BaseRequirement):
     """Evaluate a Group of Conditions"""
     def __init__(self, cond_list, grouping="all", group_name=None, item=None):
         """
-            - cond_list :  A list of callables which evaluate to a boolean 
-                value.
-            - grouping :  A number, "any", or "all"... Defines how many of the
+        *Arguments:*
+            
+            ``cond_list``
+                A list of callables which evaluate to a boolean value.
+            ``grouping``
+                A number, "any", or "all"... Defines how many of the
                 callables must evaluate to true in order to pass the 
                 requirement. Negative values are treated as "at least" this 
                 many, while positive values are treated as "exactly" this many.
@@ -817,8 +821,10 @@ class GroupRequirement(BaseRequirement):
 
 def require_one_of(*args):
     """
-    ``args`` should be a list of Field objects.  Take this list and build an
-    appropriate GroupRequirement.
+    *Arguments*
+        ``args``
+            Should be a list of Field objects.  ``require_one_of`` takes this 
+            list and builds an appropriate GroupRequirement.
     
     It should be noted that requirement generation may be lazily evaluated
     (as it is in the case of this function).  Lazy evaluation is faked in the
@@ -839,8 +845,10 @@ def require_one_of(*args):
     
 def require_any_of(*args):
     """
-    ``args`` should be a list of Field objects.  Take this list and build an
-    appropriate GroupRequirement.
+    *Arguments*
+        ``args``
+            Should be a list of Field objects.  ``require_any_of`` takes this 
+            list and builds an appropriate GroupRequirement.
     
     It should be noted that requirement generation may be lazily evaluated
     (as it is in the case of this function).  Lazy evaluation is faked in the
@@ -1406,3 +1414,7 @@ class Repo(BaseItem):
     yum_options = DictField(
         comment="Options to write to yum config file",
         )
+
+if __name__ == '__main__':
+    import doctest
+    doctest.testmod(verbose=True)

@@ -24,6 +24,8 @@ import time
 import random
 #import base64
 
+import config
+
 __all__ = (
     'get',
     'get_types',
@@ -31,8 +33,6 @@ __all__ = (
     'find',
     'new',
 )
-
-default_source = 'base'
 
 
 ##############################################################################
@@ -81,8 +81,7 @@ def get(uid, source=None):
     *Return Value:*
         An Item object.
     """
-    global default_source
-    if not source: source = default_source
+    if not source: source = config.default_source
     if source not in handlers.types:
         raise InvalidSource(
             "The object source of '%s' is not provided." % source)
@@ -152,8 +151,7 @@ def find(criteria, slice=["_uid"], source=None):
         first property in the tuples returned will always be that 
         Item's ``_uid``.
     """
-    global default_source
-    if not source: source = default_source
+    if not source: source = config.default_source
     if source not in handlers.types:
         raise InvalidSource(
             "The object source of '%s' is not provided." % source)
@@ -177,8 +175,7 @@ def new(item_type, source=None):
         A blank Item with the default handlers bound to it and populated 
         with its own UID, Creation Time, and Modification Time.
     """
-    global default_source
-    if not source: source = default_source
+    if not source: source = config.default_source
     if source not in handlers.types:
         raise InvalidSource(
             "The object source of '%s' is not provided." % source)
