@@ -3,9 +3,10 @@ import doctest
 import sys
 import os
 import __init__ as store
+import config
 
 #Because we want everything to use the testing handlers...
-store.default_source = 'test'
+config.default_source = 'test'
 
 class TestItem(unittest.TestCase):
 #    def test_find(self):
