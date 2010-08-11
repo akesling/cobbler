@@ -226,23 +226,25 @@ class BaseField(object):
         Expected results from calling ``validate``:
             * If the field is valid, ``validate`` returns a True value.
               
-              >>> foo.bar.set('Hello validation!')
-              >>> foo.bar.validate()
-              True
-              >>> foo.baz.set(1337)
-              >>> foo.baz.validate()
-              True
-              
-              >>> foo.validate()
-              True
+                  >>> foo.bar.set('Hello validation!')
+                  >>> foo.bar.validate()
+                  True
+                  
+                  >>> foo.baz.set(1337)
+                  >>> foo.baz.validate()
+                  True
+                  
+                  >>> foo.validate()
+                  True
             
             * If the field is invalid, ``validate`` will ``raise`` an 
               appropriate Exception which subclasses
               CobblerValidationException.
                
-              >>> foo.bar.set(13)
-              >>> foo.bar.validate()
-              True
+                  >>> foo.bar.set(13)
+                  
+                  >>> foo.bar.validate()
+                  True
               
               Now, shouldn't that last example have thrown an exception?  
               Well, you have to remember that values passed in through 
@@ -250,12 +252,12 @@ class BaseField(object):
               means that in this case the integer ``13`` was cast to a string 
               ``'13'``.
               
-              >>> foo.bar.get()
-              u'13'
-              
-              >>> foo.baz.set('103')
-              >>> foo.baz.get()
-              103
+                  >>> foo.bar.get()
+                  u'13'
+                  
+                  >>> foo.baz.set('103')
+                  >>> foo.baz.get()
+                  103
               
               Also note that the value returned from the StrField is a Unicode 
               string. Wherever possible, the Object Store tries to store all 
@@ -267,10 +269,15 @@ class BaseField(object):
               coercion, so if you hand in a non-coercible string it will 
               complain in just the same way as if you called ``int('foo')``.
               
-              >>> foo.baz.set('foo')
-              Traceback (most recent call last):
-                  ...
-              ValueError: invalid literal for int() with base 10: 'foo'
+                  >>> foo.baz.set('foo')
+                  Traceback (most recent call last):
+                      ...
+                  ValueError: invalid literal for int() with base 10: 'foo'
+                  
+                  >>> foo.baz.set('1.2')
+                  Traceback (most recent call last):
+                      ...
+                  ValueError: invalid literal for int() with base 10: '1.2'
               
         """
         value = self.get()
@@ -483,11 +490,6 @@ def _attach_reqs(cls, cls_name, bases, attrs):
     for base in bases:
         if hasattr(base, '_requirements'):
             attrs['_requirements'].extend(base._requirements)
-    # Bind the object's name to it's requirements so that we
-    # can return clearer errors.
-    for req in attrs['_requirements']:
-        if not callable(req) and not req._item:
-            req._item = item
 
 
 class MetaItem(type):
@@ -547,7 +549,6 @@ class ItemIterator(object):
         return name, value
 
 
-field_memo = {}
 class BaseItem(object):
     """The Most Basic Item Class (From Which All Are Derived)
     
@@ -596,8 +597,6 @@ class BaseItem(object):
         self._load_handler = load_handler
         self._store_handler = store_handler
         
-        global field_memo
-        
         for field in self._fields:
             # It's useful to have each Item instance with its
             # own members... the declarative style used to define
@@ -607,7 +606,17 @@ class BaseItem(object):
             
             # It's also always nice to know who you're a member of
             getattr(self, field)._item = self
-    
+        
+        self._requirements = copy.deepcopy(self._requirements)
+        for i, req in enumerate(self._requirements):
+            # Bind the object's name to it's requirements so that we can
+            # do fancier things (like return clearer errors)
+            if not callable(req) and not req._item:
+                req._item = item
+            else:
+                self._requirements[i] = req(self)
+        
+
     def __iter__(self):
         return ItemIterator(self)
     
@@ -759,6 +768,7 @@ class BaseItem(object):
 __all__.extend((
     'BaseRequirement',
     'GroupRequirement',
+    'require_n_of',
     'require_one_of',
     'require_any_of',
 ))
@@ -771,7 +781,7 @@ class BaseRequirement(object):
     
 class GroupRequirement(BaseRequirement):
     """Evaluate a Group of Conditions"""
-    def __init__(self, cond_list, grouping="all", group_name=None, item=None):
+    def __init__(self, cond_list, grouping="all", group_name="Group Condition", item=None):
         """
         *Arguments:*
             
@@ -788,14 +798,17 @@ class GroupRequirement(BaseRequirement):
         if grouping is "any":
             self._grouping = -1
         if grouping is "all":
-            self._grouping = len(self._func_list)
+            self._grouping = len(self._cond_list)
         else:
             self._grouping = grouping
-        # If item isn't set _now_, it _should_ be set in __new__
+        
+        # If item isn't set _now_, it _should_ be set at Item instantiation
+        # The only sad thing with doing this is that you have to trust 
+        # that this will be properly set later (boo tight coupling).
         self._item = item
         
         # Wouldn't it be nice if we had a name for our group?  That seems
-        # like it could make errors _so_ much cleaner.
+        # like it could make errors _so_ much cleaner to read.
         self._group_name = group_name
     
     def validate(self):
@@ -815,9 +828,117 @@ class GroupRequirement(BaseRequirement):
                 u"Item of type %s failed a %s on a condition (%s)." % (
                     self._item.__class__.__name__, 
                     self.__class__.__name__, 
-                    self._group_name or repr(func),
+                    self._group_name,
                 ))
         super(GroupRequirement, self).validate()
+
+def require_n_of(*args, **kwargs):
+    """
+    *Arguments*
+        ``args``
+            Should be a list of Field objects.  ``require_one_of`` takes this 
+            list and builds an appropriate GroupRequirement.
+    
+    
+    ``require_one_of`` is a helper function which generates a GroupRequirement 
+    (really a nice little closure which later generates one, but that doesn't 
+    matter so much from a usage standpoint).  It is used like any other 
+    Requirement, you must append it to the ``_requirements`` list during 
+    declaration of an Item.  So, say you want an Item to represent a pizza 
+    which must have two out of the following three properties: Sauce, Cheese, 
+    or Toppings.
+    
+        >>> import objects
+        >>> class Pizza(objects.BaseItem):
+        ...     _requirements = []
+        ...     
+        ...     toppings = objects.ListField()
+        ...     sauce = objects.ChoiceField(
+        ...         default='Tomato',
+        ...         choices=('None', 'Tomato', 'Basil Pesto', 'White'))
+        ...     cheese = objects.BoolField(default=True)
+        ...     
+        ...     _requirements.append(objects.require_n_of(
+        ...         'toppings', 'sauce', 'cheese', grouping=2)
+        ...     )
+    
+    Note the creation of ``_requirements``.  The object store will only be able
+    to act on Requirements it finds here.  Now let's see how this requirement 
+    works in the grand scheme of things.  Let's make a Pizza and see what 
+    just validating the empty Item does.
+
+        >>> import __init__ as store
+        >>> p = store.new('Pizza')
+        >>> p.validate()
+        False
+
+    Oooh, it isn't valid.  Let's see why.
+
+        >>> p._errors
+        [(u'Require N Of: toppings, sauce, cheese', InvalidRequirement(u'Item of type Pizza failed a GroupRequirement on a condition (Require N Of: toppings, sauce, cheese).',))]
+        >>> # Clean that up a little:
+        >>> error_name, error_body = p._errors[0]
+        >>> error_body
+        InvalidRequirement(u'Item of type Pizza failed a GroupRequirement on a condition (Require N Of: toppings, sauce, cheese).',)
+    
+    Note that this is an InvalidRequirement Exception (which subclasses 
+    CobblerValidationException), and that its message is pretty readable.
+
+        >>> print error_body
+        Item of type Pizza failed a GroupRequirement on a condition (Require N Of: toppings, sauce, cheese).
+    
+    Now let's try to fix this error.  First let's choose a sauce. If you look 
+    at the definition above, the sauce field has a default value.  When 
+    evaluating GroupRequirements of this type, it checks whether the field
+    is set, which is different than a default value.  After all, if you have
+    a default value and that's good enough for you, why are you trying add
+    this requirement?
+        
+        >>> p.sauce.choices
+        ['None', 'Tomato', 'Basil Pesto', 'White']
+        >>> p.sauce.set('Basil Pesto')
+        >>> p.validate()
+        False
+
+    Still not valid... good.  Let's try adding cheese.
+    
+        >>> p.cheese.set(True)
+        >>> p.validate()
+        True
+        
+    Look at that, it passed!  Now what about the error list we saw earlier?
+    
+        >>> p._errors
+        []
+    
+    And there you go.  A full GroupRequirement using the ``require_n_of``
+    helper from start to finish.
+    
+    
+    It should be noted that requirement generation may be "lazily evaluated"
+    (as it is in the case of this function).  Lazy evaluation is faked in the
+    requirements system by allowing requirements passed into an Item to be a
+    callable which builds and returns a requirement.  Note that they are 
+    actually evaluated at instantiation time of the given Item they are bound
+    to.
+    """
+    if 'grouping' in kwargs: grouping = kwargs['grouping']
+    else: grouping=1
+    if 'name_prefix' in kwargs: name_prefix = kwargs['name_prefix']
+    else: name_prefix="Require N Of: "
+    
+    def lazy(item): 
+        req = GroupRequirement(
+            map(lambda x:getattr(item, x).is_set, args), 
+            group_name=name_prefix + unicode(
+                ", ".join(map(lambda x:getattr(item, x)._name, args))), 
+            grouping=grouping,
+        )
+        req._item = item
+        return req
+
+    return lazy
+    
 
 def require_one_of(*args):
     """
@@ -826,22 +947,14 @@ def require_one_of(*args):
             Should be a list of Field objects.  ``require_one_of`` takes this 
             list and builds an appropriate GroupRequirement.
     
-    It should be noted that requirement generation may be lazily evaluated
+    It should be noted that requirement generation may be "lazily evaluated"
     (as it is in the case of this function).  Lazy evaluation is faked in the
     requirements system by allowing requirements passed into an Item to be a
-    callable which builds and returns a requirement.
+    callable which builds and returns a requirement.  Note that they are 
+    actually evaluated at instantiation time of the given Item they are bound
+    to.
     """
-    def lazy(item): 
-        req = GroupRequirement(
-            map(lambda x:x.is_set, args), 
-            group_name="Require One of: %s" % 
-                ", ".join(map(lambda x:x._name, args)), 
-            grouping="1",
-        )
-        req._item = item
-        return req
-
-    return lazy
+    return require_n_of(*args, grouping=1, name_prefix="Require One of: ")
     
 def require_any_of(*args):
     """
@@ -850,22 +963,14 @@ def require_any_of(*args):
             Should be a list of Field objects.  ``require_any_of`` takes this 
             list and builds an appropriate GroupRequirement.
     
-    It should be noted that requirement generation may be lazily evaluated
+    It should be noted that requirement generation may be "lazily evaluated"
     (as it is in the case of this function).  Lazy evaluation is faked in the
     requirements system by allowing requirements passed into an Item to be a
-    callable which builds and returns a requirement.
+    callable which builds and returns a requirement.  Note that they are 
+    actually evaluated at instantiation time of the given Item they are bound
+    to.
     """
-    def lazy(item): 
-        req = GroupRequirement(
-            map(lambda x:x.is_set, args), 
-            group_name="Require Any of: %s" % 
-                ", ".join(map(lambda x:x._name, args)), 
-            grouping="any",
-        )
-        req._item = item
-        return req
-    
-    return lazy
+    return require_n_of(*args, grouping="any", name_prefix="Require One of: ")
 
 ##############################################################################
 ### Default Items ############################################################
@@ -1209,7 +1314,7 @@ class System(BaseItem):
     #       on both Fields?
     profile = ItemField(item_type='Profile')
     image = ItemField(item_type='Image')
-    _requirements.append(require_one_of(profile, image))
+    _requirements.append(require_one_of('profile', 'image'))
     
     def render(self, inheritance_path=[]):
         # This makes inheritance acyclic... ----------------------------------
@@ -1278,7 +1383,7 @@ class System(BaseItem):
         )
     power_type = ChoiceField(
         display_name="Power Management Type",
-        default="SETTINGS:power_management_default_type",
+        default="foo",#XXX: Needs to be loaded from config
         choices=('foo', 'bar', 'baz'),#XXX: Needs to be loaded from config
         )
     power_address = StrField(
@@ -1315,6 +1420,7 @@ class System(BaseItem):
         display_name=u"MTU",
         )
     bonding = ChoiceField(
+        default="na",
         display_name="Bonding Mode",
         choices=["na","master","slave"],
         )

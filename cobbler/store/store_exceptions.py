@@ -1,10 +1,13 @@
 ##############################################################################
 ### Object Store Exceptions ##################################################
 
+class CobblerStoreException(Exception):
+    pass
+
 ## Validation exceptions ####################################################
 
 
-class CobblerValidationException(Exception):
+class CobblerValidationException(CobblerStoreException):
     pass
 
 
@@ -43,7 +46,7 @@ class InvalidFormat(CobblerValidationException):
 ## Handler Exceptions #######################################################
 
 
-class CobblerHandlerException(Exception):
+class CobblerHandlerException(CobblerStoreException):
     pass
 
 
