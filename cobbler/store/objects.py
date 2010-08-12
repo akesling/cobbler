@@ -132,6 +132,7 @@ class BaseField(object):
         self.visible = bool(visible)
         
         self._value = None
+        self._set = False
         
     
 #    def __set__(self, instance, value):
@@ -191,6 +192,7 @@ class BaseField(object):
             self._value = value
         else:
             self._value = self._coerce(value)
+        self._set = True
     
     def is_set(self):
         """Check if this Field has been set
@@ -206,10 +208,7 @@ class BaseField(object):
             True
         
         """
-        if None != self._value:
-            return True
-        else:
-            return False
+        return self._set
     
     def get_signature(self):
         sig = (
@@ -571,9 +570,11 @@ class ItemIterator(object):
         if self.count >= self.len:
             raise StopIteration()
         name = self.item._fields[self.count]
-        value = getattr(self.item, name).get()
+        field = getattr(self.item, name)
+        value = field.get()
+        set_state = int(field.is_set())
         self.count += 1
-        return name, value
+        return name, (value, set_state)
 
 
 class BaseItem(object):
@@ -694,9 +695,10 @@ class BaseItem(object):
                 attr = getattr(self, key)
                 if isinstance(attr, BaseField):
                     # Because "None" is a specially treated type, ignore
-                    # all field values passed as None
-                    if val is not None:
-                        attr.set(val)
+                    #   all field values passed as None
+                    # Also check whether set metadata evaluates properly
+                    if val[0] is not None and val[1] == 1:
+                        attr.set(val[0])
             except AttributeError:
                 # Please ignore the fact that this attribute doesn't exist
                 #   it is effectively unnecessary to log it (unless you
@@ -732,7 +734,7 @@ class BaseItem(object):
             sig.append((fld_name, getattr(self, fld_name).get_signature()))
         return tuple(sig)
                 
-    def render(self, inheritance_path=[]):
+    def render(self, parents=[], inheritance_path=[]):
         """By default ``render`` is a synonym for ``deflate``
         
         However, if special actions (such as Item level inheritance) are
@@ -746,12 +748,27 @@ class BaseItem(object):
         
         # This makes inheritance acyclic... ----------------------------------
         # INCLUDE THIS WITH ALL INHERITANCE CODE -----------------------------
+        rendered = self.deflate()
         if self in inheritance_path:
-            return self.deflate()
+            return rendered 
         inheritance_path.append(self)
         # --------------------------------------------------------------------
         
-        return self.deflate()
+        # The goal of this loop construct with the parent loop on the inside
+        #   is to try avoiding rendering all parents if it is unnecessary.
+        # It also reduces the number of times you loop through rendered to 1
+        #   instead of looping through for every parent.
+        for field, value in rendered:
+            if value == "<<inherit>>":
+                for i, par in enumerate(parents):
+                    if isinstance(par, BaseItem):
+                        parents[i] = par = par.render()
+                    
+                    if field in par:
+                        rendered[field] = (par[field][0], 2)
+                        break
+        
+        return rendered
     
     def validate(self):
         """The most basic Item validation method
@@ -1027,7 +1044,7 @@ class Distro(BaseItem):
     
     distro = ItemField('Distro')
     
-    def render(self, inheritance_path=[]):
+    def render(self, parents=[], inheritance_path=[]):
         # This makes inheritance acyclic... ----------------------------------
         # INCLUDE THIS WITH ALL INHERITANCE CODE -----------------------------
         if self in inheritance_path:
@@ -1035,11 +1052,12 @@ class Distro(BaseItem):
         inheritance_path.append(self)
         # --------------------------------------------------------------------
         
-        rendered = super(Distro, self).render(inheritance_path)
-        parent = self.profile.get_ref().render(inheritance_path)
-        for field, value in rendered:
-            if value == "<<inherit>>":
-               rendered[field] = parent[field] 
+        if not parents: parents = []
+        
+        distro = self.distro.get_ref()
+        if distro: parents.append(distro)
+        rendered = super(Distro, self).render(parents, inheritance_path)
+        
         return rendered
     
     kernel = LocalFileField(
@@ -1189,7 +1207,7 @@ class Profile(BaseItem):
         item_type='Distro',
         )
     
-    def render(self, inheritance_path=[]):
+    def render(self, parents=[], inheritance_path=[]):
         # This makes inheritance acyclic... ----------------------------------
         # INCLUDE THIS WITH ALL INHERITANCE CODE -----------------------------
         if self in inheritance_path:
@@ -1197,24 +1215,19 @@ class Profile(BaseItem):
         inheritance_path.append(self)
         # --------------------------------------------------------------------
         
-        rendered = super(Profile, self).render(inheritance_path)
+        if not parents: parents = []
         
-        if self.profile.is_set():
-            parent = self.profile.get_ref().render(inheritance_path)
-        else:
-            parent = store.new('Profile').deflate()
+        distro = self.distro.get_ref()
+        if distro: parents.append(distro)
         
-        if self.distro.is_set():
-            distro = self.distro.get_ref().render(inheritance_path)
-            for field, value in parent:
-                if value == "<<inherit>>":
-                   parent[field] = distro[field] 
+        profile = self.profile.get_ref()
+        if profile: parents.append(profile)
         
-        for field, value in rendered.iteritems():
-            if value == "<<inherit>>":
-               rendered[field] = parent[field] 
+        rendered = super(Profile, self).render(parents, inheritance_path)
         
         return rendered
+    
+    
     comment = StrField(
         tags=['TextField'],
         )
@@ -1346,7 +1359,7 @@ class System(BaseItem):
     image = ItemField(item_type='Image')
     _requirements.append(require_one_of('profile', 'image'))
     
-    def render(self, inheritance_path=[]):
+    def render(self, parents=[], inheritance_path=[]):
         # This makes inheritance acyclic... ----------------------------------
         # INCLUDE THIS WITH ALL INHERITANCE CODE -----------------------------
         if self in inheritance_path:
@@ -1354,14 +1367,11 @@ class System(BaseItem):
         inheritance_path.append(self)
         # --------------------------------------------------------------------
         
-        rendered = super(Profile, self).render(inheritance_path)
-        profile = self.profile.get_ref().render(inheritance_path)
-        image = self.image.get_ref().render(inheritance_path)
-        # Since only one of the two should be non-False.
+        profile = self.profile.get_ref()
+        image = self.image.get_ref()
         parent = profile or image
-        for field, value in rendered:
-            if value == "<<inherit>>":
-               rendered[field] = parent[field] 
+        
+        rendered = super(System, self).render([parent], inheritance_path)
         return rendered
 
     kernel_options = DictField()

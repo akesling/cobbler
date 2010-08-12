@@ -87,7 +87,7 @@ def get(uid, source=None):
             "The object source of '%s' is not provided." % source)
     
     repr = getattr(handlers, source+'_load')(uid)
-    obj = getattr(objects, repr['_type'])(
+    obj = getattr(objects, repr['_type'][0])(
             load_handler=getattr(handlers, source+'_load'),
             store_handler=getattr(handlers, source+'_store'),
         )

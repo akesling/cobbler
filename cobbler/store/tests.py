@@ -39,6 +39,9 @@ class TestItem(unittest.TestCase):
         self.assertRaises(InvalidSource, store.new, 'foo', source='bar')
         self.assertRaises(InvalidSource, store.new, 'Distro', source='bar')
         
+        self.assertRaises(InvalidSource, store.find, {'name':'Test_Distro', '_type':'Distro'}, source='bar')
+        self.assertRaises(InvalidSource, store.find, {'name':'foo', '_type':'baz'}, source='bar')
+        
         self.test_distro_store()
         uid = store.find({'name':'Test_Distro', '_type':'Distro'})[0]
         self.assertRaises(InvalidSource, store.get, uid, source='bar')
@@ -50,31 +53,31 @@ class TestItem(unittest.TestCase):
         #Just make sure everything is the same...
         self.assertEqual(d.deflate(), 
                             {
-                            '_ctime': d._ctime.get(),
-                            '_mtime': d._mtime.get(),
-                            '_type': u'Distro',
-                            '_uid': uid,
-                            'architecture': u'i386',
-                            'breed': u'redhat',
-                            'comment': u'',
-                            'depth': 0,
-                            'distro': u'',
-                            'initrd': u'/tmp/temp_initrd.tmp',
-                            'kernel': u'/tmp/temp_kernel.tmp',
-                            'kernel_options': {},
-                            'kernel_options_post': {},
-                            'kickstart_metadata': {},
-                            'mgmt_classes': [],
-                            'mgmt_parameters': '<<inherit>>',
-                            'name': u'Test_Distro',
-                            'os_version': u'generic26',
-                            'owners': [],
-                            'red_hat_management_key': '<<inherit>>',
-                            'red_hat_management_server': '<<inherit>>',
-                            'source_repos': [],
-                            'template_files': {},
-                            'template_remote_kickstarts': False,
-                            'tree_build_time': u''
+                            '_ctime': (d._ctime.get(), 1),
+                            '_mtime': (d._mtime.get(), 1),
+                            '_type': (u'Distro', 0),
+                            '_uid': (d._uid.get(), 1),
+                            'architecture': (u'i386', 0),
+                            'breed': (u'redhat', 0),
+                            'comment': (u'', 0),
+                            'depth': (0, 0),
+                            'distro': (u'', 0),
+                            'initrd': (u'/tmp/temp_initrd.tmp', 1),
+                            'kernel': (u'/tmp/temp_kernel.tmp', 1),
+                            'kernel_options': ({}, 0),
+                            'kernel_options_post': ({}, 0),
+                            'kickstart_metadata': ({}, 0),
+                            'mgmt_classes': ([], 0),
+                            'mgmt_parameters': ('<<inherit>>', 0),
+                            'name': (u'Test_Distro', 1),
+                            'os_version': (u'generic26', 0),
+                            'owners': ([], 0),
+                            'red_hat_management_key': ('<<inherit>>', 0),
+                            'red_hat_management_server': ('<<inherit>>', 0),
+                            'source_repos': ([], 0),
+                            'template_files': ({}, 0),
+                            'template_remote_kickstarts': (False, 0),
+                            'tree_build_time': (u'', 0)
                             }
                         )
         self.assertEqual(unicode(d.deflate()), unicode(d))
@@ -89,8 +92,6 @@ class TestItem(unittest.TestCase):
             blank_item.inflate(item.deflate())
             self.assertEqual(item.deflate(), blank_item.deflate())
             blank_item = store.new(item_type)
-            self.assertEqual(simplejson.loads(
-                    simplejson.dumps(item.deflate())), item.deflate())
             blank_item.inflate(simplejson.loads(
                                             simplejson.dumps(
                                                 item.deflate())))
