@@ -4,6 +4,8 @@ import sys
 import os
 import __init__ as store
 import config
+from store_exceptions import *
+import simplejson
 
 #Because we want everything to use the testing handlers...
 config.default_source = 'test'
@@ -21,8 +23,78 @@ class TestItem(unittest.TestCase):
 #                print i
 #        store.set(d)
 #        print store.find({'name':'Hello'})
+    def setUp(self):
+        self.tearDown()
+    
     def tearDown(self):
         store.handlers.test_flush()
+    
+    def test_undefined_type(self):
+        self.assertRaises(TypeNotFound, store.new, 'foo')
+    
+    def test_invalid_item(self):
+        self.assertRaises(ItemNotFound, store.get, 'foo')
+    
+    def test_invalid_handler_source(self):
+        self.assertRaises(InvalidSource, store.new, 'foo', source='bar')
+        self.assertRaises(InvalidSource, store.new, 'Distro', source='bar')
+        
+        self.test_distro_store()
+        uid = store.find({'name':'Test_Distro', '_type':'Distro'})[0]
+        self.assertRaises(InvalidSource, store.get, uid, source='bar')
+        
+    def test_deflate(self):
+        self.test_distro_store()
+        uid = store.find({'name':'Test_Distro', '_type':'Distro'})[0][0]
+        d = store.get(uid)
+        #Just make sure everything is the same...
+        self.assertEqual(d.deflate(), 
+                            {
+                            '_ctime': d._ctime.get(),
+                            '_mtime': d._mtime.get(),
+                            '_type': u'Distro',
+                            '_uid': uid,
+                            'architecture': u'i386',
+                            'breed': u'redhat',
+                            'comment': u'',
+                            'depth': 0,
+                            'distro': u'',
+                            'initrd': u'/tmp/temp_initrd.tmp',
+                            'kernel': u'/tmp/temp_kernel.tmp',
+                            'kernel_options': {},
+                            'kernel_options_post': {},
+                            'kickstart_metadata': {},
+                            'mgmt_classes': [],
+                            'mgmt_parameters': '<<inherit>>',
+                            'name': u'Test_Distro',
+                            'os_version': u'generic26',
+                            'owners': [],
+                            'red_hat_management_key': '<<inherit>>',
+                            'red_hat_management_server': '<<inherit>>',
+                            'source_repos': [],
+                            'template_files': {},
+                            'template_remote_kickstarts': False,
+                            'tree_build_time': u''
+                            }
+                        )
+        self.assertEqual(unicode(d.deflate()), unicode(d))
+        self.assertEqual(str(d), unicode(d))
+    
+    def test_inflate(self):
+        for item_type in store.get_types():
+            item = store.new(item_type)
+            if hasattr(item, 'name'):
+                item.name.set('foo')
+            blank_item = store.new(item_type)
+            blank_item.inflate(item.deflate())
+            self.assertEqual(item.deflate(), blank_item.deflate())
+            blank_item = store.new(item_type)
+            self.assertEqual(simplejson.loads(
+                    simplejson.dumps(item.deflate())), item.deflate())
+            blank_item.inflate(simplejson.loads(
+                                            simplejson.dumps(
+                                                item.deflate())))
+            self.assertEqual(item.deflate(), blank_item.deflate())
     
     def test_distro_store(self):
         # Make our fake files so that the LocalFileFields will be happy
@@ -37,6 +109,7 @@ class TestItem(unittest.TestCase):
         
         d = store.new('Distro')
         self.assertFalse(d.validate())
+        self.assertFalse(store.set(d))
         ERRORS = dict(d._errors)
         self.assertEqual(len(d._errors), 3)
         self.assertTrue('kernel' in ERRORS)
@@ -54,6 +127,7 @@ class TestItem(unittest.TestCase):
     def test_image_store(self):
         i = store.new('Image')
         self.assertFalse(i.validate())
+        self.assertFalse(store.set(i))
         ERRORS = dict(i._errors)
         self.assertEqual(len(i._errors), 1)
         self.assertTrue('name' in ERRORS)
@@ -68,6 +142,7 @@ class TestItem(unittest.TestCase):
         self.test_distro_store()
         i = store.new('Profile')
         self.assertFalse(i.validate())
+        self.assertFalse(store.set(i))
         ERRORS = dict(i._errors)
         self.assertEqual(len(i._errors), 2)
         self.assertTrue('name' in ERRORS)
@@ -84,6 +159,7 @@ class TestItem(unittest.TestCase):
         self.test_profile_store()
         i = store.new('System')
         self.assertFalse(i.validate())
+        self.assertFalse(store.set(i))
         ERRORS = dict(i._errors)
         self.assertEqual(len(i._errors), 2)
         self.assertTrue('Require One of: profile, image' in ERRORS)
@@ -99,6 +175,7 @@ class TestItem(unittest.TestCase):
     def test_repo_store(self):
         i = store.new('Repo')
         self.assertFalse(i.validate())
+        self.assertFalse(store.set(i))
         ERRORS = dict(i._errors)
         self.assertEqual(len(i._errors), 1)
         self.assertTrue('name' in ERRORS)
@@ -116,25 +193,50 @@ class TestFields(unittest.TestCase):
     def test_str_field(self):
         s = store.objects.StrField()
         self.assertEqual(s.get(), u'')
+        self.assertEqual(unicode(s), u'')
+        self.assertEqual(str(s), u'')
         s.set('foo')
         self.assertEqual(s.get(), u'foo')
+        self.assertEqual(unicode(s), u'foo')
+        self.assertEqual(str(s), u'foo')
         s.set(134.7)
         self.assertEqual(s.get(), u'134.7')
+        self.assertEqual(unicode(s), u'134.7')
+        self.assertEqual(str(s), u'134.7')
         s.set(None)
         self.assertEqual(s.get(), u'None')
+        self.assertEqual(unicode(s), u'None')
+        self.assertEqual(str(s), u'None')
         
         s = store.objects.StrField(default='boo')
         self.assertEqual(s.get(), u'boo')
+        self.assertEqual(unicode(s), u'boo')
+        self.assertEqual(str(s), u'boo')
         self.assertTrue(s.validate())
         s.set('foo')
         self.assertEqual(s.get(), u'foo')
+        self.assertEqual(unicode(s), u'foo')
+        self.assertEqual(str(s), u'foo')
         self.assertTrue(s.validate())
         s.set(134.7)
         self.assertEqual(s.get(), u'134.7')
+        self.assertEqual(unicode(s), u'134.7')
+        self.assertEqual(str(s), u'134.7')
         self.assertTrue(s.validate())
         s.set(None)
         self.assertEqual(s.get(), u'None')
+        self.assertEqual(unicode(s), u'None')
+        self.assertEqual(str(s), u'None')
         self.assertTrue(s.validate())
+
+        self.assertEqual(s.get_signature(), ((u'class', u'StrField'),
+                                             (u'default', u'boo'),
+                                             (u'visible', u'True'),
+                                             (u'inherit', u'False'),
+                                             (u'required', u'False'),
+                                             (u'editable', u'True'),
+                                             (u'tags', u'[]'))
+                                    )
 
     def test_int_field(self):
         i = store.objects.IntField()
@@ -150,6 +252,19 @@ class TestFields(unittest.TestCase):
         
         self.assertEqual(i.get(), 189)
         self.assertTrue(i.validate())
+        
+        self.assertEqual(i.get_signature(), ((u'class', u'IntField'),
+                                             (u'default', u'0'),
+                                             (u'visible', u'True'),
+                                             (u'inherit', u'False'),
+                                             (u'required', u'False'),
+                                             (u'editable', u'True'),
+                                             (u'tags', u'[]'))
+                            )
+    
+#    def test_datetime_field(self):
+#        f = store.objects.DateTimeField()
+        
 
 if __name__ == '__main__':
     unittest.main()

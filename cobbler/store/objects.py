@@ -40,7 +40,15 @@ __all__.extend((
 
 
 class MetaField(type):
-    pass
+    def __new__(cls, cls_name, bases, attrs):
+        # Because up until now _coerce is technically a method and we want
+        # it to act as just plain ol' function, let's rebind it as a static
+        # method.
+        if '_coerce' in attrs:
+            attrs['_coerce'] = staticmethod(attrs['_coerce'])
+        
+        new_type = super(MetaField, cls).__new__(cls, cls_name, bases, attrs)
+        return new_type
 
 
 class BaseField(object):
@@ -90,7 +98,7 @@ class BaseField(object):
     """
     __metaclass__ = MetaField
     
-    _coerce = staticmethod(lambda x:x)
+    _coerce = lambda x:x
     _type = type(None)
     
     default = None
@@ -134,7 +142,7 @@ class BaseField(object):
 #        super(BaseField, self).__delete__(self, instance)
     
     def __unicode__(self):
-        return unicode(self._value)
+        return unicode(self.get())
     
     def __str__(self):
         return unicode(self)
@@ -160,7 +168,25 @@ class BaseField(object):
             return self.default
     
     def set(self, value):
-        """This Field's setter"""
+        """This Field's setter
+        
+        The value is actually unset if the value passed in is the default 
+        value. This avoids issues like:
+       
+           #. Send deflated object to Web UI
+           #. User fills in values they find important
+           #. Information gets stored in the Object Store
+           #. User shuts down cobbler and changes defaults
+           #. User boots cobbler back up to find that
+              the values on previously saved objects have
+              not changed because the default values were
+              stored as the set value....
+
+            Another problem it avoids is that a value loaded from disk,
+            or handed back from a UI for that matter, isn't treated
+            as "set" if it hasn't been...
+        """
+        
         if self.inherit and value == "<<inherit>>":
             self._value = value
         else:
@@ -625,7 +651,7 @@ class BaseItem(object):
         return unicode(self)
     
     def __unicode__(self):
-        return unicode(dict(self))
+        return unicode(self.deflate())
     
     def _load(self, handler=None):
         if not handler:
@@ -667,7 +693,10 @@ class BaseItem(object):
             try:
                 attr = getattr(self, key)
                 if isinstance(attr, BaseField):
-                    attr.set(val)
+                    # Because "None" is a specially treated type, ignore
+                    # all field values passed as None
+                    if val is not None:
+                        attr.set(val)
             except AttributeError:
                 # Please ignore the fact that this attribute doesn't exist
                 #   it is effectively unnecessary to log it (unless you
@@ -892,7 +921,7 @@ def require_n_of(*args, **kwargs):
     at the definition above, the sauce field has a default value.  When 
     evaluating GroupRequirements of this type, it checks whether the field
     is set, which is different than a default value.  After all, if you have
-    a default value and that's good enough for you, why are you trying add
+    a default value and that's good enough for you, why are you adding
     this requirement?
         
         >>> p.sauce.choices
