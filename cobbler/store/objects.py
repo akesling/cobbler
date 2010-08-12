@@ -193,6 +193,7 @@ class BaseField(object):
                         (u"inherit",    unicode(self.inherit)   ),
                         (u"required",   unicode(self.required)  ),
                         (u"editable",   unicode(self.editable)  ),
+                        (u"tags",       unicode(self.tags)      ),
                     )
         
         return sig
