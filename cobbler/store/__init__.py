@@ -87,7 +87,7 @@ def get(uid, source=None):
             "The object source of '%s' is not provided." % source)
     
     repr = getattr(handlers, source+'_load')(uid)
-    obj = getattr(objects, repr['_type'][0])(
+    obj = objects._item_types[repr['_type'][0]](
             load_handler=getattr(handlers, source+'_load'),
             store_handler=getattr(handlers, source+'_store'),
         )
@@ -149,14 +149,22 @@ def find(criteria, slice=["_uid"], source=None):
         The tuples returned will be ordered in the same fashion as 
         ``slice``.  Whether specified in the slice list or not, the 
         first property in the tuples returned will always be that 
-        Item's ``_uid``.
+        Item's ``_uid``.  All duplicates and invalid properties in the
+        slice list will be ignored/removed from output.
     """
     if not source: source = config.default_source
     if source not in handlers.types:
         raise InvalidSource(
             "The object source of '%s' is not provided." % source)
     
-    return getattr(handlers, source+'_find')(criteria, slice)
+    no_dups = ['_uid']
+    for prop in slice:
+        if prop in no_dups:
+            continue
+        else:
+            no_dups.append(prop)
+    
+    return getattr(handlers, source+'_find')(criteria, no_dups)
 
 
 def new(item_type, source=None):

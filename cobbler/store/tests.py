@@ -14,6 +14,60 @@ config.default_source = 'test'
 #       Write a basic test for each provided field type
 #       Test inheritance on all provided inheriting Items
 
+class TestStore(unittest.TestCase):
+    def setUp(self):
+        self.tearDown()
+    
+    def tearDown(self):
+        store.handlers.test_flush()
+
+    def test_undefined_type(self):
+        self.assertRaises(TypeNotFound, store.new, 'foo')
+    
+    def test_invalid_item(self):
+        self.assertRaises(ItemNotFound, store.get, 'foo')
+
+    def test_find_slicing(self):
+        class CheeseShop(store.objects.BaseItem):
+            employees = store.objects.ListField(required=True)
+            cheeses = store.objects.ListField(required=True)            
+         
+        uids = []
+        employees = ('Larry', 'Moe', 'Curly')
+        cheeses = ('Limburger', 'Gruyer', 'Camembert')
+        for e,c in zip(employees, cheeses):
+            i = store.new('CheeseShop')
+            i.employees.set([e])
+            i.cheeses.set([c])
+            self.assertTrue(store.set(i))
+            uids.append(i._uid.get())
+        for e,c in zip(employees[::-1], cheeses[::-1]):
+            i = store.new('CheeseShop')
+            i.employees.set([e])
+            i.cheeses.set([c])
+            self.assertTrue(store.set(i))
+            uids.append(i._uid.get())
+        
+        cheeseshops = store.find({'_type':'CheeseShop'}, ['employees', 'cheeses', '_uid'])
+        self.assertEqual(len(cheeseshops), 6)
+        for shop in cheeseshops:
+            self.assertEqual(len(shop), 3)
+            self.assertTrue(shop[1][0] in employees)
+            self.assertTrue(shop[2][0] in cheeses)
+    
+    def test_invalid_handler_source(self):
+        self.assertRaises(InvalidSource, store.new, 'foo', source='bar')
+        self.assertRaises(InvalidSource, store.new, 'Distro', source='bar')
+        
+        self.assertRaises(InvalidSource, store.find, {'name':'Test_Distro', '_type':'Distro'}, source='bar')
+        self.assertRaises(InvalidSource, store.find, {'name':'foo', '_type':'baz'}, source='bar')
+        
+        i = store.new('Repo')
+        i.name.set('Test_Repo')
+        store.set(i)
+        uid = store.find({'name':'Test_Repo', '_type':'Repo'})[0]
+        self.assertRaises(InvalidSource, store.get, uid, source='bar')
+        
 class TestItem(unittest.TestCase):
 #    def test_find(self):
 #        d = store.new('Distro')
@@ -29,23 +83,6 @@ class TestItem(unittest.TestCase):
     def tearDown(self):
         store.handlers.test_flush()
     
-    def test_undefined_type(self):
-        self.assertRaises(TypeNotFound, store.new, 'foo')
-    
-    def test_invalid_item(self):
-        self.assertRaises(ItemNotFound, store.get, 'foo')
-    
-    def test_invalid_handler_source(self):
-        self.assertRaises(InvalidSource, store.new, 'foo', source='bar')
-        self.assertRaises(InvalidSource, store.new, 'Distro', source='bar')
-        
-        self.assertRaises(InvalidSource, store.find, {'name':'Test_Distro', '_type':'Distro'}, source='bar')
-        self.assertRaises(InvalidSource, store.find, {'name':'foo', '_type':'baz'}, source='bar')
-        
-        self.test_distro_store()
-        uid = store.find({'name':'Test_Distro', '_type':'Distro'})[0]
-        self.assertRaises(InvalidSource, store.get, uid, source='bar')
-        
     def test_deflate(self):
         self.test_distro_store()
         uid = store.find({'name':'Test_Distro', '_type':'Distro'})[0][0]
@@ -96,6 +133,107 @@ class TestItem(unittest.TestCase):
                                             simplejson.dumps(
                                                 item.deflate())))
             self.assertEqual(item.deflate(), blank_item.deflate())
+
+    def test_signature(self):
+        class Pizza(store.objects.BaseItem):
+            _requirements = []
+            
+            toppings = store.objects.ListField()
+            sauce = store.objects.ChoiceField(
+                default='Tomato',
+                choices=('None', 'Tomato', 'Basil Pesto', 'White'))
+            cheese = store.objects.BoolField(default=True)
+            
+            _requirements.append(store.objects.require_n_of(
+                'toppings', 'sauce', 'cheese', grouping=2)
+            )
+
+        i = store.new('Pizza')
+        self.assertEqual(i.get_signature(),
+                        (('_mtime',
+                          ((u'class', u'TimeField'),
+                           (u'default', u'None'),
+                           (u'visible', u'True'),
+                           (u'inherit', u'False'),
+                           (u'required', u'True'),
+                           (u'editable', u'False'),
+                           (u'tags', u'[]'))),
+                         ('_type',
+                          ((u'class', u'StrField'),
+                           (u'default', u'Pizza'),
+                           (u'visible', u'True'),
+                           (u'inherit', u'False'),
+                           (u'required', u'False'),
+                           (u'editable', u'False'),
+                           (u'tags', u'[]'))),
+                         ('_ctime',
+                          ((u'class', u'TimeField'),
+                           (u'default', u'None'),
+                           (u'visible', u'True'),
+                           (u'inherit', u'False'),
+                           (u'required', u'True'),
+                           (u'editable', u'False'),
+                           (u'tags', u'[]'))),
+                         ('_uid',
+                          ((u'class', u'StrField'),
+                           (u'default', u'None'),
+                           (u'visible', u'True'),
+                           (u'inherit', u'False'),
+                           (u'required', u'True'),
+                           (u'editable', u'False'),
+                           (u'tags', u'[]'))),
+                         ('cheese',
+                          ((u'class', u'BoolField'),
+                           (u'default', u'True'),
+                           (u'visible', u'True'),
+                           (u'inherit', u'False'),
+                           (u'required', u'False'),
+                           (u'editable', u'True'),
+                           (u'tags', u'[]'))),
+                         ('_type',
+                          ((u'class', u'StrField'),
+                           (u'default', u'Pizza'),
+                           (u'visible', u'True'),
+                           (u'inherit', u'False'),
+                           (u'required', u'False'),
+                           (u'editable', u'False'),
+                           (u'tags', u'[]'))),
+                         ('toppings',
+                          ((u'class', u'ListField'),
+                           (u'default', u'[]'),
+                           (u'visible', u'True'),
+                           (u'inherit', u'False'),
+                           (u'required', u'False'),
+                           (u'editable', u'True'),
+                           (u'tags', u'[]'))),
+                         ('sauce',
+                          ((u'class', u'ChoiceField'),
+                           (u'default', u'Tomato'),
+                           (u'visible', u'True'),
+                           (u'inherit', u'False'),
+                           (u'required', u'False'),
+                           (u'editable', u'True'),
+                           (u'tags', u'[]')))))
+        
+    
+    def test_inter_item_inheritance(self):
+        self.test_distro_store()
+        
+        parent = store.new('Profile')
+        parent.name.set('parent')
+        parent.distro.set('Test_Distro')
+        self.assertTrue(store.set(parent))
+        
+        #print 'distro', parent.distro.get_uid()
+        #print 'profile', parent._uid.get()
+        
+        child = store.new('Profile')
+        child.name.set('child')
+        child.profile.set('parent')
+        child.validate()
+        print child._errors
+        self.asserTrue(False)
+        self.assertTrue(store.set(child))
     
     def test_distro_store(self):
         # Make our fake files so that the LocalFileFields will be happy
@@ -190,6 +328,23 @@ class TestItem(unittest.TestCase):
 class TestFields(unittest.TestCase):
     def tearDown(self):
         store.handlers.test_flush()
+
+    def test_set(self):
+        # Standard case
+        f = store.objects.IntField()
+        self.assertFalse(f.is_set())
+        f.set(1)
+        self.assertTrue(f.is_set())
+        
+        # With simple coercion
+        f = store.objects.IntField()
+        f.set('1')
+        self.assertTrue(f.is_set())
+        
+        # Does the inheritance clause work?
+        f = store.objects.IntField(inherit=True)
+        f.set('<<inherit>>')
+        self.assertTrue(f.is_set())
     
     def test_str_field(self):
         s = store.objects.StrField()
@@ -263,8 +418,50 @@ class TestFields(unittest.TestCase):
                                              (u'tags', u'[]'))
                             )
     
-#    def test_datetime_field(self):
-#        f = store.objects.DateTimeField()
+    def test_datetime_field(self):
+        # At the moment, this was just added for test coverage... 
+        # XXX: NEED TO TEST MORE... like whether this properly serializes
+        #       (last time I checked, it didn't).
+        f = store.objects.DateTimeField()
+        
+    def test_item_field(self):
+        i = store.new('Repo')
+        i.name.set('Test_Repo')
+        store.set(i)
+        
+        f = store.objects.ItemField('Repo')
+        self.assertFalse(f.get_uid())
+        self.assertTrue(f.validate())
+        f.set('Test_Repo')
+        self.assertTrue(f.validate())
+        self.assertEqual(f.get_uid(), i._uid.get())
+        
+        f = store.objects.ItemField('Repo', required=True)
+        
+        # Since we aren't actually accessing this field correctly (it isn't 
+        # properly bound to an Item), we need to do a couple things to make
+        # this more kosher.
+        f._name = 'foo'
+        
+        self.assertFalse(f.get_uid())
+        self.assertRaises(InvalidItem, f.validate)
+        f.set('Test_Repo')
+        self.assertTrue(f.validate())
+        self.assertEqual(f.get_uid(), i._uid.get())
+        
+
+class TestRequirements(unittest.TestCase):
+    def tearDown(self):
+        store.handlers.test_flush()
+    
+    def test_laziness(self):
+        foo = [True, False, False]
+        class TestReqMagic(store.objects.BaseItem):
+            _requirements = []
+            _requirements.append(store.objects.GroupRequirement(
+                        ( lambda:foo[0], lambda:foo[1], lambda:foo[2] )))
+        i = store.new('TestReqMagic')
+        self.assertFalse(i.validate())
         
 
 if __name__ == '__main__':

@@ -350,7 +350,7 @@ class DateTimeField(BaseField):
     
     def __init__(self, *args, **kwargs):
         self.default = datetime.datetime.now()
-        super(DateTimeField, self).__init__(self, *args, **kwargs)
+        super(DateTimeField, self).__init__(*args, **kwargs)
 
 
 class DictField(BaseField):
@@ -423,7 +423,7 @@ class ItemField(StrField):
         self.item_type = self._coerce(item_type)
         super(ItemField, self).__init__(*args, **kwargs)
     
-    def get_ref(self):
+    def get_uid(self):
         """Get the object which this field represents.
      
         *Return Value:*
@@ -432,28 +432,28 @@ class ItemField(StrField):
             Else it returns False
         """
 
-        if self.validate() and bool(self._value) == True:
-            return store.get(
-                store.find({'_type': self.item_type, 'name': self.get()})[0])
+        item_props = store.find({'_type': self.item_type, 'name': self.get()})
+        #print 'in get_uid', item_props, self.get(), self.item_type
+        if item_props:
+            return item_props[0][0]
         else:
             return False
     
     def validate(self):
-        exists = lambda t,n: len(store.find({'_type': t, 'name': n}))
+        exists = lambda t,n: bool(store.find({'_type': t, 'name': n}))
         if (self.is_set() or self.required) and \
-                not exists(self.item_type, self.get()):
+                not self.get_uid():
             #print ''
-            #print self.get(), self._value, self.default, self.inherit, self.required
-            
+            #print self.get(), self.get_uid(), self._value, self.default, self.inherit, self.required
             if self.required and self.inherit and self.get() == "<<inherit>>":
                 #This if-case is here because rendering could be expensive
                 rendered = self._item.render()
-                if not exists(self.item_type, rendered[self._name]):
+                if not exists(self.item_type, rendered[self._name][0]):
                     raise InvalidItem(
                     u"Field '%s' of type '%s' has been unable to properly"
                      " inherit a valid Item. The rendered result returned" \
                      " the name '%s' and type '%s'." %
-                    (self._name, self.__class__.__name__, rendered[self._name], 
+                    (self._name, self.__class__.__name__, rendered[self._name][0], 
                     self.item_type))
             else:
                 raise InvalidItem(
@@ -572,9 +572,8 @@ class ItemIterator(object):
         name = self.item._fields[self.count]
         field = getattr(self.item, name)
         value = field.get()
-        set_state = int(field.is_set())
         self.count += 1
-        return name, (value, set_state)
+        return name, value
 
 
 class BaseItem(object):
@@ -640,7 +639,7 @@ class BaseItem(object):
             # Bind the object's name to it's requirements so that we can
             # do fancier things (like return clearer errors)
             if not callable(req) and not req._item:
-                req._item = item
+                req._item = self
             else:
                 self._requirements[i] = req(self)
         
@@ -718,23 +717,30 @@ class BaseItem(object):
     def deflate(self):
         """Return ``self`` as an object representation
         
-        This method literally calls ``dict(self)``.
+        This method adds a little more metadata than just calling 
+        ``dict(self)`` would.
         
         If a different format than a python dict is preferable, the 
         handling code should do the coercion from a provided format (such
         as taking the deflated dict and munging that how it desires).
         """
-        return dict(self)
+        deflated = {}
+        for name, value in self:
+            field = getattr(self, name)
+            set_state = int(field.is_set())
+            deflated[name] = (value, set_state)
+        return deflated
     
     def get_signature(self):
         """Return a representation of the Item's fundamental properties.
         """
+        # TODO: needs to include requirements.
         sig = []
         for fld_name in self._fields:
             sig.append((fld_name, getattr(self, fld_name).get_signature()))
         return tuple(sig)
                 
-    def render(self, parents=[], inheritance_path=[]):
+    def render(self, parents=[], inheritance_path=None):
         """By default ``render`` is a synonym for ``deflate``
         
         However, if special actions (such as Item level inheritance) are
@@ -746,25 +752,31 @@ class BaseItem(object):
         # But because it is required pretty much everywhere else... it is 
         # included here for homogeneity.
         
+        #print 'bar', inheritance_path, parents, self._uid.get()
         # This makes inheritance acyclic... ----------------------------------
-        # INCLUDE THIS WITH ALL INHERITANCE CODE -----------------------------
         rendered = self.deflate()
+        if not inheritance_path: inheritance_path = []
         if self in inheritance_path:
             return rendered 
         inheritance_path.append(self)
         # --------------------------------------------------------------------
         
+        #print 'foo', inheritance_path, parents
         # The goal of this loop construct with the parent loop on the inside
         #   is to try avoiding rendering all parents if it is unnecessary.
         # It also reduces the number of times you loop through rendered to 1
         #   instead of looping through for every parent.
-        for field, value in rendered:
-            if value == "<<inherit>>":
+        for field, value in rendered.iteritems():
+            if value[0] == "<<inherit>>":
                 for i, par in enumerate(parents):
+                    if isinstance(par, basestring):
+                        #print 'my parent is::', par
+                        parents[i] = par = store.get(par)
                     if isinstance(par, BaseItem):
-                        parents[i] = par = par.render()
+                        parents[i] = par = par.render(
+                                    inheritance_path=inheritance_path)
                     
-                    if field in par:
+                    if field in par and par[field][0] != "<<inherit>>":
                         rendered[field] = (par[field][0], 2)
                         break
         
@@ -867,7 +879,7 @@ class GroupRequirement(BaseRequirement):
         passed = 0
         for cond in self._cond_list:
             if cond():
-                 passed += 1
+                passed += 1
         if ((self._grouping < 0 and passed < abs(self._grouping)) or \
             passed < self._grouping):
             
@@ -1044,17 +1056,10 @@ class Distro(BaseItem):
     
     distro = ItemField('Distro')
     
-    def render(self, parents=[], inheritance_path=[]):
-        # This makes inheritance acyclic... ----------------------------------
-        # INCLUDE THIS WITH ALL INHERITANCE CODE -----------------------------
-        if self in inheritance_path:
-            return self.deflate()
-        inheritance_path.append(self)
-        # --------------------------------------------------------------------
-        
+    def render(self, parents=None, inheritance_path=None):
         if not parents: parents = []
         
-        distro = self.distro.get_ref()
+        distro = self.distro.get_uid()
         if distro: parents.append(distro)
         rendered = super(Distro, self).render(parents, inheritance_path)
         
@@ -1197,8 +1202,6 @@ class Profile(BaseItem):
     name = StrField(required=True)
     owners = ListField()#XXX: Needs to be loaded from config
     
-    # XXX: Also, how will the group requirement deal with default being set
-    #       on both Fields?
     profile = ItemField(item_type='Profile')
     distro = ItemField(
         required=True,
@@ -1207,20 +1210,13 @@ class Profile(BaseItem):
         item_type='Distro',
         )
     
-    def render(self, parents=[], inheritance_path=[]):
-        # This makes inheritance acyclic... ----------------------------------
-        # INCLUDE THIS WITH ALL INHERITANCE CODE -----------------------------
-        if self in inheritance_path:
-            return self.deflate()
-        inheritance_path.append(self)
-        # --------------------------------------------------------------------
-        
+    def render(self, parents=None, inheritance_path=None):
         if not parents: parents = []
         
-        distro = self.distro.get_ref()
+        distro = self.distro.get_uid()
         if distro: parents.append(distro)
         
-        profile = self.profile.get_ref()
+        profile = self.profile.get_uid()
         if profile: parents.append(profile)
         
         rendered = super(Profile, self).render(parents, inheritance_path)
@@ -1359,16 +1355,9 @@ class System(BaseItem):
     image = ItemField(item_type='Image')
     _requirements.append(require_one_of('profile', 'image'))
     
-    def render(self, parents=[], inheritance_path=[]):
-        # This makes inheritance acyclic... ----------------------------------
-        # INCLUDE THIS WITH ALL INHERITANCE CODE -----------------------------
-        if self in inheritance_path:
-            return self.deflate()
-        inheritance_path.append(self)
-        # --------------------------------------------------------------------
-        
-        profile = self.profile.get_ref()
-        image = self.image.get_ref()
+    def render(self, parents=None, inheritance_path=None):
+        profile = self.profile.get_uid()
+        image = self.image.get_uid()
         parent = profile or image
         
         rendered = super(System, self).render([parent], inheritance_path)
