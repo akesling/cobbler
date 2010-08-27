@@ -231,8 +231,6 @@ class TestItem(unittest.TestCase):
         child.name.set('child')
         child.profile.set('parent')
         child.validate()
-        print child._errors
-        self.asserTrue(False)
         self.assertTrue(store.set(child))
     
     def test_distro_store(self):
